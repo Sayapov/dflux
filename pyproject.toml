@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dflux"
+version = "0.4.0"
+description = "X-ray for transformers — multi-scale telemetry, deterministic fingerprinting, attention surgery, gradient monitoring"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.9"
+authors = [
+    { name = "Iskander Sayapov" },
+]
+keywords = [
+    "machine-learning",
+    "pytorch",
+    "deep-learning",
+    "mechanistic-interpretability",
+    "attention-heads",
+    "telemetry",
+    "transformer-internals",
+    "dilution-analysis",
+    "inference",
+    "gradient-monitoring",
+    "reproducibility",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = []
+
+[project.optional-dependencies]
+torch = ["torch>=2.0"]
+hf = ["transformers>=4.30", "torch>=2.0"]
+lightning = ["lightning>=2.0", "torch>=2.0"]
+all = ["torch>=2.0", "transformers>=4.30", "lightning>=2.0"]
+
+[project.urls]
+Homepage = "https://github.com/iskandersayapov/dflux"
+Issues = "https://github.com/iskandersayapov/dflux/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dflux"]
