@@ -154,6 +154,9 @@ class TokenSnapshot:
     dilution_wasted_work: Optional[List[float]]        # [n_layers] ||delta_i|| * (1 - |survival|) — energy that doesn't reach output
     dilution_cumulative_drift: Optional[List[float]]   # [n_layers] cumulative direction change from layer 0
 
+    # ── Layer metadata (for hybrid architectures) ──
+    layer_types: Optional[List[str]] = None  # [n_layers] "full_attention" / "linear_attention" / "unknown"
+
     def to_dict(self) -> Dict[str, Any]:
         d = {
             "token_idx": self.token_idx,
@@ -172,6 +175,7 @@ class TokenSnapshot:
             "persistent_dims", "persistent_dim_energies",
             "dilution_survival", "dilution_energy_frac",
             "dilution_wasted_work", "dilution_cumulative_drift",
+            "layer_types",
         ]:
             val = getattr(self, attr)
             if val is not None:
@@ -257,9 +261,18 @@ class MultiScaleTelemetry:
         telem = cls(n_layers=n_layers, cfg=cfg, unembedding=unembedding, ln_f=ln_f)
         telem._model = model
         telem._tokenizer = tokenizer
+
+        # Detect layer types for hybrid architectures (e.g., Qwen3.5)
+        telem._layer_types = [cls._get_layer_type(layer) for layer in layers]
+        is_hybrid = any(lt != "unknown" for lt in telem._layer_types)
+
         telem._attach_hooks(layers)
 
         print(f"[telemetry] Attached to {n_layers} layers")
+        if is_hybrid:
+            n_full = sum(1 for lt in telem._layer_types if lt == "full_attention")
+            n_linear = sum(1 for lt in telem._layer_types if lt == "linear_attention")
+            print(f"[telemetry] Hybrid architecture: {n_full} full attention, {n_linear} linear attention")
         signals = []
         signals.append("residual_stream")
         if cfg.logit_lens:
@@ -364,11 +377,34 @@ class MultiScaleTelemetry:
 
     @staticmethod
     def _find_attn_module(layer) -> Optional[nn.Module]:
-        """Find the attention sub-module within a transformer block."""
-        for attr in ["attn", "attention", "self_attn", "self_attention"]:
+        """Find the attention sub-module within a transformer block.
+
+        Handles standard softmax attention AND hybrid architectures like
+        Qwen3.5 which interleave Gated DeltaNet (linear_attn) with
+        full softmax attention (self_attn).
+        """
+        for attr in ["attn", "attention", "self_attn", "self_attention",
+                      "linear_attn", "temporal_block"]:
             if hasattr(layer, attr):
                 return getattr(layer, attr)
         return None
+
+    @staticmethod
+    def _get_layer_type(layer) -> str:
+        """Detect layer type for hybrid architectures.
+
+        Returns:
+            "full_attention" — standard softmax attention
+            "linear_attention" — Gated DeltaNet or similar linear attention
+            "unknown" — standard transformer (non-hybrid)
+        """
+        if hasattr(layer, "layer_type"):
+            return str(layer.layer_type)
+        if hasattr(layer, "linear_attn"):
+            return "linear_attention"
+        if hasattr(layer, "temporal_block"):
+            return "linear_attention"
+        return "unknown"
 
     @staticmethod
     def _find_mlp_module(layer) -> Optional[nn.Module]:
@@ -889,6 +925,7 @@ class MultiScaleTelemetry:
             dilution_energy_frac=dilution_energy_frac,
             dilution_wasted_work=dilution_wasted_work,
             dilution_cumulative_drift=dilution_cumulative_drift,
+            layer_types=self._layer_types if any(lt != "unknown" for lt in self._layer_types) else None,
         )
 
         self.snapshots.append(snapshot)
@@ -1045,6 +1082,7 @@ class MultiScaleTelemetry:
                      getattr(getattr(self._model, "config", None), "_name_or_path", "unknown")),
             "n_layers": self.n_layers,
             "n_tokens": len(self.snapshots),
+            "layer_types": self._layer_types if any(lt != "unknown" for lt in self._layer_types) else None,
             "config": {
                 "logit_lens": self.cfg.logit_lens,
                 "cross_layer": self.cfg.cross_layer,

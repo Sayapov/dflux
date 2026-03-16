@@ -32,22 +32,122 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 from dflux.multiscale_telemetry import MultiScaleTelemetry, TelemetryConfig
 
 
-def load_model(model_name: str, device: str):
+def _detect_nested_keys(model_name: str) -> bool:
+    """Peek at checkpoint key format without loading weights."""
+    from huggingface_hub import hf_hub_download
+    try:
+        idx_path = hf_hub_download(model_name, "model.safetensors.index.json")
+        with open(idx_path) as f:
+            first_key = next(iter(json.load(f)["weight_map"].keys()))
+        return "language_model." in first_key
+    except Exception:
+        pass
+    try:
+        from safetensors import safe_open
+        path = hf_hub_download(model_name, "model.safetensors")
+        with safe_open(path, framework="pt") as f:
+            first_key = next(iter(f.keys()))
+        return "language_model." in first_key
+    except Exception:
+        return True
+
+
+def _load_qwen35(model_name: str, config, torch_dtype, device: str):
+    """Qwen3.5 loading: promote config, detect key format, load/remap."""
+    from transformers import Qwen3_5ForCausalLM
+
+    # Skip deprecated config attrs during promotion
+    _SKIP_ATTRS = {"use_return_dict", "output_hidden_states", "output_attentions",
+                   "torchscript", "pruned_heads", "is_encoder_decoder"}
+    text_cfg = getattr(config, "text_config", None)
+    if text_cfg is not None:
+        for attr in dir(text_cfg):
+            if attr.startswith("_") or attr in _SKIP_ATTRS:
+                continue
+            try:
+                object.__getattribute__(config, attr)
+            except AttributeError:
+                try:
+                    val = getattr(text_cfg, attr)
+                    if not callable(val):
+                        setattr(config, attr, val)
+                except Exception:
+                    pass
+
+    needs_remap = _detect_nested_keys(model_name)
+
+    if not needs_remap:
+        print(f"  Detected flat key format, using from_pretrained...")
+        model = Qwen3_5ForCausalLM.from_pretrained(
+            model_name, config=config, dtype=torch_dtype,
+            trust_remote_code=True,
+        )
+        return model.to(device)
+
+    print(f"  Detected nested keys (language_model.*), using manual remap...")
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file as safe_load
+
+    model = Qwen3_5ForCausalLM(config).to(dtype=torch_dtype)
+    try:
+        idx = hf_hub_download(model_name, "model.safetensors.index.json")
+        with open(idx) as f:
+            weight_map = json.load(f)["weight_map"]
+        full_sd = {}
+        for shard in set(weight_map.values()):
+            path = hf_hub_download(model_name, shard)
+            for k, v in safe_load(path, device="cpu").items():
+                full_sd[k.replace("model.language_model.", "model.")] = v
+    except Exception:
+        path = hf_hub_download(model_name, "model.safetensors")
+        full_sd = {k.replace("model.language_model.", "model."): v
+                   for k, v in safe_load(path, device="cpu").items()}
+
+    info = model.load_state_dict(full_sd, strict=False)
+    loaded = len(full_sd) - len(info.unexpected_keys)
+    print(f"  Remapped {loaded} weight tensors (language_model → flat)")
+    if info.missing_keys:
+        real_missing = [k for k in info.missing_keys if "lm_head" not in k]
+        if real_missing:
+            print(f"  Warning: {len(real_missing)} keys still missing")
+    del full_sd
+    gc.collect()
+    return model.to(device)
+
+
+def load_model(model_name: str, device: str, dtype: str = "float32"):
     """Load model and tokenizer."""
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 
     print(f"\n{'='*70}")
-    print(f"Loading {model_name} on {device}")
+    print(f"Loading {model_name} on {device} ({dtype})")
     print(f"{'='*70}")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.float32,  # Full precision for reproducibility
-    ).to(device)
+    dtype_map = {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }
+    torch_dtype = dtype_map.get(dtype, torch.float32)
+
+    config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    model_type = getattr(config, "model_type", "")
+
+    if model_type == "qwen3_5":
+        model = _load_qwen35(model_name, config, torch_dtype, device)
+    else:
+        try:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, dtype=torch_dtype, trust_remote_code=True,
+            ).to(device)
+        except TypeError:
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, torch_dtype=torch_dtype, trust_remote_code=True,
+            ).to(device)
     model.eval()
 
     return model, tokenizer
@@ -497,10 +597,12 @@ def main():
     parser.add_argument("--prompt", default="The meaning of life is", help="Input prompt")
     parser.add_argument("--tokens", type=int, default=32, help="Tokens to generate")
     parser.add_argument("--runs", type=int, default=2, help="Number of runs (compared pairwise)")
+    parser.add_argument("--dtype", default="float32", choices=["float32", "float16", "bfloat16"],
+                        help="Model dtype (bfloat16 for large models)")
     parser.add_argument("--output", default=None, help="Save detailed diff JSON")
     args = parser.parse_args()
 
-    model, tokenizer = load_model(args.model, args.device)
+    model, tokenizer = load_model(args.model, args.device, args.dtype)
 
     # Run N times
     runs_data = []

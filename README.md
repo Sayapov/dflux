@@ -50,16 +50,22 @@ All signals are raw numbers. No labels. No classifications. Interpretation is yo
 
 ## Deterministic fingerprint
 
-Under greedy decoding (`do_sample=False`), the telemetry is **bit-for-bit identical** across runs. Verified on:
+Under greedy decoding (`do_sample=False`), the telemetry is **bit-for-bit identical** across runs. Verified across four architectures:
 
-- GPT-2 (12 layers) — 2 runs, 0 diffs
-- Pythia-1.4B (24 layers) — 2 runs, 0 diffs
-- Mistral-7B (32 layers) — 5 runs, 10 pairwise comparisons, 115,795 numerical values per run, **zero differences**
+| Model | Architecture | Layers | Values/run | Runs | Pairs | Result |
+|-------|-------------|--------|-----------|------|-------|--------|
+| GPT-2 | Dense softmax | 12 | ~43K | 2 | 1 | Identical |
+| Pythia-1.4B | Dense softmax | 24 | ~86K | 2 | 1 | Identical |
+| Mistral-7B | GQA softmax | 32 | ~116K | 5 | 10 | Identical |
+| Qwen3.5-9B | Hybrid DeltaNet + softmax | 32 | ~116K | 2 | 1 | Identical |
+
+The Qwen3.5 result is notable — its Gated DeltaNet layers (linear attention with recurrent state updates) introduce no non-determinism. The deterministic fingerprint property holds across standard attention, grouped-query attention, and linear/recurrent attention mechanisms.
 
 This means single-run ablation studies have zero uncertainty. Change one head, prune one layer, quantize one weight — run telemetry once, diff against baseline, and every deviation is a guaranteed causal effect.
 
 ```bash
 python examples/reproducibility_test.py --model mistralai/Mistral-7B-v0.1 --device mps --runs 5
+python examples/reproducibility_test.py --model Qwen/Qwen3.5-9B --device mps --dtype bfloat16 --runs 2
 ```
 
 ## What we found: dilution scales with depth, not parameters
@@ -76,9 +82,23 @@ Cross-architecture telemetry on 5 models reveals how much compute is wasted — 
 
 Dilution is an architectural property — doubling from 12 to 24 layers more than doubles waste. Mistral compensates with 137x residual norm growth; Phi-2 with 98.3% entropy reduction. GPT-2 is the outlier: shallow enough that most layer work survives.
 
+### Base vs instruct: hybrid architecture comparison
+
+Compared Qwen3.5-9B-Base vs Qwen3.5-9B (instruct) — a hybrid architecture with 24 Gated DeltaNet layers and 8 full softmax attention layers (3:1 pattern).
+
+Instruction tuning hits the two layer types differently:
+
+- **Full attention layers** show 2.1x larger dilution survival shifts (12.2% vs 5.7% relative change) — instruction following rewrites what information survives through the softmax attention routing
+- **DeltaNet layers** absorbed most of the efficiency gains — wasted work dropped 4.7% in linear attention vs 1.0% in full attention
+- Final-layer entropy increases 4.5% (base 2.13 → tuned 2.23 nats) — the instruct model hedges more, spreading probability across candidates
+- Norm growth slightly reined in (37.9x → 36.1x) — more controlled residual stream
+
 ```bash
 # Run telemetry on multiple models
 python examples/multiscale_telemetry.py --model "gpt2,EleutherAI/pythia-1.4b" --device mps
+
+# Compare base vs instruct
+python examples/base_vs_tuned.py --base Qwen/Qwen3.5-9B-Base --tuned Qwen/Qwen3.5-9B --device mps --dtype bfloat16
 
 # Compare existing runs
 python examples/multiscale_telemetry.py --compare "telemetry_gpt2.json,telemetry_EleutherAI-pythia-1.4b.json"
@@ -220,7 +240,9 @@ pip install dflux[all]         # everything
 
 ## Architecture support
 
-Auto-detection for: GPT-2, LLaMA, Mistral, Pythia (NeoX), Phi, Qwen, MPT, BERT, Falcon.
+Auto-detection for: GPT-2, LLaMA, Mistral, Pythia (NeoX), Phi, Qwen (including Qwen3.5 hybrid DeltaNet), MPT, BERT, Falcon.
+
+Hybrid architecture support: auto-detects mixed attention types (e.g., DeltaNet + softmax) and annotates each layer's type in the telemetry output.
 
 Adding support for a new architecture = adding one pattern to the detection logic.
 

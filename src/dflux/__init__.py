@@ -66,6 +66,11 @@ from dflux.multiscale_telemetry import (
     TokenSnapshot,
     quick_telemetry,
 )
+from dflux.live_governor import (
+    LiveGovernor,
+    GovernorRule,
+    GovernorIntervention,
+)
 
 __all__ = [
     "DFluxMeter", "DFluxConfig",
@@ -80,5 +85,6 @@ __all__ = [
     "quick_profile", "STIMULUS_BATTERIES",
     "MultiScaleTelemetry", "TelemetryConfig", "TokenSnapshot",
     "quick_telemetry",
+    "LiveGovernor", "GovernorRule", "GovernorIntervention",
     "__version__",
 ]
