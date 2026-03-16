@@ -224,6 +224,14 @@ Auto-detection for: GPT-2, LLaMA, Mistral, Pythia (NeoX), Phi, Qwen, MPT, BERT, 
 
 Adding support for a new architecture = adding one pattern to the detection logic.
 
+## References & related work
+
+DFlux builds on or is inspired by the following:
+
+- **Jansma & Hoel (2025)**, "Engineering Emergence" — the causal primitives framework (determinism, specificity, mutual information as causation measure) that our `CausalPrimitives` and `CPSurgeon` modules implement. [Paper](https://arxiv.org/abs/2502.11753)
+- **Moonshot AI (2026)**, "Attention Residuals" — demonstrated that standard additive residual connections dilute early-layer contributions in deep transformers. Our dilution analysis (Scale 8 of MultiScaleTelemetry) empirically measures this per-layer survival. [GitHub](https://github.com/MoonshotAI/Attention-Residuals/)
+- **State Flow Machine** (Chang Cheng, 2025) — explores explicit state tracking through computation layers, related to our dimension channel tracking which finds persistent information highways in the residual stream. [GitHub](https://github.com/changcheng967/state-flow-machine)
+
 ## License
 
 MIT. Free instrument. Use it, fork it, build on it.
