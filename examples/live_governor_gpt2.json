@@ -1,0 +1,1041 @@
+{
+  "config": {
+    "model": "gpt2",
+    "device": "mps",
+    "dtype": "float32",
+    "tokens": 32,
+    "mode": "reactive"
+  },
+  "baseline": [
+    {
+      "prompt": "The key to understanding deep learning is",
+      "text": " to understand how it works.\n\nDeep learning is a technique that allows you to learn a set of algorithms that can be used to solve a problem.\n",
+      "final_entropy": null,
+      "n_snapshots": 32
+    },
+    {
+      "prompt": "In the year 2050, artificial intelligence will",
+      "text": " be the dominant technology in the world.\n\nThe world's population will grow by about 1.5 billion by 2050, according to the World Bank.\n",
+      "final_entropy": null,
+      "n_snapshots": 32
+    },
+    {
+      "prompt": "The most important scientific discovery of the 21st century was",
+      "text": " the discovery of the first atomic bomb. The first atomic bomb was detonated in 1945. The first atomic bomb was detonated in 1945. The first atomic bomb was detonated",
+      "final_entropy": null,
+      "n_snapshots": 32
+    }
+  ],
+  "governed": {
+    "entropy": [
+      {
+        "prompt": "The key to understanding deep learning is",
+        "text": " to understand how it works.\n\nDeep learning is a technique that allows you to learn a set of concepts and then apply them to a set of data.",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 299,
+          "tokens_observed": 32,
+          "interventions_per_token": 9.34375,
+          "top_layers": [
+            {
+              "layer": 10,
+              "count": 31,
+              "mean_scale": 0.85,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 30,
+              "mean_scale": 1.03,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 29,
+              "mean_scale": 1.005172,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 27,
+              "mean_scale": 1.061111,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 27,
+              "mean_scale": 1.061111,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 27,
+              "mean_scale": 1.061111,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 27,
+              "mean_scale": 1.016667,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 26,
+              "mean_scale": 1.046154,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 26,
+              "mean_scale": 1.057692,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 25,
+              "mean_scale": 0.994,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 157
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 142
+            }
+          },
+          "mean_scales": {
+            "0": 1.028125,
+            "1": 1.051562,
+            "2": 0.995313,
+            "3": 1.014062,
+            "4": 1.0375,
+            "5": 1.004687,
+            "6": 1.051562,
+            "7": 1.051562,
+            "8": 1.046875,
+            "9": 0.934375,
+            "10": 0.854688,
+            "11": 1.0
+          }
+        }
+      },
+      {
+        "prompt": "In the year 2050, artificial intelligence will",
+        "text": " be the dominant technology in the world.\n\nThe world's population will grow by about 1.5 billion people by 2050, according to the World Bank.",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 310,
+          "tokens_observed": 32,
+          "interventions_per_token": 9.6875,
+          "top_layers": [
+            {
+              "layer": 2,
+              "count": 32,
+              "mean_scale": 1.028125,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 30,
+              "mean_scale": 1.01,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 10,
+              "count": 30,
+              "mean_scale": 0.86,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 30,
+              "mean_scale": 1.07,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 28,
+              "mean_scale": 1.053571,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 28,
+              "mean_scale": 0.989286,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 27,
+              "mean_scale": 1.038889,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 27,
+              "mean_scale": 1.005556,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 27,
+              "mean_scale": 0.927778,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 26,
+              "mean_scale": 1.023077,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 162
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 148
+            }
+          },
+          "mean_scales": {
+            "0": 1.009375,
+            "1": 1.01875,
+            "2": 1.028125,
+            "3": 1.060937,
+            "4": 1.046875,
+            "5": 1.065625,
+            "6": 0.990625,
+            "7": 1.004687,
+            "8": 1.032812,
+            "9": 0.939063,
+            "10": 0.86875,
+            "11": 1.0
+          }
+        }
+      },
+      {
+        "prompt": "The most important scientific discovery of the 21st century was",
+        "text": " the discovery of the first atomic bomb. The first atomic bomb was detonated in the United States on September 11, 2001. The first atomic bomb was detonated in the",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 285,
+          "tokens_observed": 32,
+          "interventions_per_token": 8.90625,
+          "top_layers": [
+            {
+              "layer": 10,
+              "count": 31,
+              "mean_scale": 0.85,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 29,
+              "mean_scale": 1.087931,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 29,
+              "mean_scale": 0.932759,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 28,
+              "mean_scale": 1.021429,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 27,
+              "mean_scale": 0.994444,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 26,
+              "mean_scale": 1.023077,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 24,
+              "mean_scale": 1.0,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 24,
+              "mean_scale": 1.0,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 24,
+              "mean_scale": 1.025,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 22,
+              "mean_scale": 1.040909,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 139
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 146
+            }
+          },
+          "mean_scales": {
+            "0": 1.01875,
+            "1": 1.014062,
+            "2": 0.995313,
+            "3": 1.0,
+            "4": 1.0,
+            "5": 1.01875,
+            "6": 1.079687,
+            "7": 1.01875,
+            "8": 1.028125,
+            "9": 0.939063,
+            "10": 0.854688,
+            "11": 1.0
+          }
+        }
+      }
+    ],
+    "dominance": [
+      {
+        "prompt": "The key to understanding deep learning is",
+        "text": " to understand how it works.\n\nThe key to understanding deep learning is to understand how it works.\n\nThe key to understanding deep learning is to understand",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 32,
+          "tokens_observed": 32,
+          "interventions_per_token": 1.0,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 32,
+              "mean_scale": 0.8,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "attn_norms relative_above 2.0",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 1.0,
+            "1": 1.0,
+            "2": 1.0,
+            "3": 1.0,
+            "4": 1.0,
+            "5": 1.0,
+            "6": 1.0,
+            "7": 1.0,
+            "8": 1.0,
+            "9": 1.0,
+            "10": 1.0,
+            "11": 0.8
+          }
+        }
+      },
+      {
+        "prompt": "In the year 2050, artificial intelligence will",
+        "text": " be the dominant technology in the world.\n\nThe next generation of artificial intelligence will be able to solve complex problems, such as the problem of how to make",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 32,
+          "tokens_observed": 32,
+          "interventions_per_token": 1.0,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 32,
+              "mean_scale": 0.8,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "attn_norms relative_above 2.0",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 1.0,
+            "1": 1.0,
+            "2": 1.0,
+            "3": 1.0,
+            "4": 1.0,
+            "5": 1.0,
+            "6": 1.0,
+            "7": 1.0,
+            "8": 1.0,
+            "9": 1.0,
+            "10": 1.0,
+            "11": 0.8
+          }
+        }
+      },
+      {
+        "prompt": "The most important scientific discovery of the 21st century was",
+        "text": " the discovery of the first atomic bomb. The first atomic bomb was detonated in the United States on September 11, 2001. The first atomic bomb was detonated in the",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 32,
+          "tokens_observed": 32,
+          "interventions_per_token": 1.0,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 32,
+              "mean_scale": 0.8,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "attn_norms relative_above 2.0",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 1.0,
+            "1": 1.0,
+            "2": 1.0,
+            "3": 1.0,
+            "4": 1.0,
+            "5": 1.0,
+            "6": 1.0,
+            "7": 1.0,
+            "8": 1.0,
+            "9": 1.0,
+            "10": 1.0,
+            "11": 0.8
+          }
+        }
+      }
+    ],
+    "survival": [
+      {
+        "prompt": "The key to understanding deep learning is",
+        "text": " to understand how it works.\n\nDeep learning is a technique that uses a set of neural networks to learn a set of tasks. The neural networks are trained",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 384,
+          "tokens_observed": 32,
+          "interventions_per_token": 12.0,
+          "top_layers": [
+            {
+              "layer": 0,
+              "count": 32,
+              "mean_scale": 0.980836,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 32,
+              "mean_scale": 0.826316,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 32,
+              "mean_scale": 0.892284,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 32,
+              "mean_scale": 0.895602,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 32,
+              "mean_scale": 0.879403,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 32,
+              "mean_scale": 0.950312,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 32,
+              "mean_scale": 0.916076,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 32,
+              "mean_scale": 1.002451,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 32,
+              "mean_scale": 1.030032,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 32,
+              "mean_scale": 1.099873,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            }
+          },
+          "mean_scales": {
+            "0": 0.980836,
+            "1": 0.826316,
+            "2": 0.892284,
+            "3": 0.895602,
+            "4": 0.879403,
+            "5": 0.950312,
+            "6": 0.916076,
+            "7": 1.002451,
+            "8": 1.030032,
+            "9": 1.099873,
+            "10": 1.22867,
+            "11": 1.298144
+          }
+        }
+      },
+      {
+        "prompt": "In the year 2050, artificial intelligence will",
+        "text": " be the dominant technology in the world.\n\nThe world's population will grow by about 1.5 billion by 2050, according to the World Bank.\n",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 384,
+          "tokens_observed": 32,
+          "interventions_per_token": 12.0,
+          "top_layers": [
+            {
+              "layer": 0,
+              "count": 32,
+              "mean_scale": 0.976341,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 32,
+              "mean_scale": 0.847664,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 32,
+              "mean_scale": 0.894851,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 32,
+              "mean_scale": 0.876762,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 32,
+              "mean_scale": 0.883974,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 32,
+              "mean_scale": 0.895992,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 32,
+              "mean_scale": 0.970301,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 32,
+              "mean_scale": 1.002086,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 32,
+              "mean_scale": 1.014851,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 32,
+              "mean_scale": 1.092771,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            }
+          },
+          "mean_scales": {
+            "0": 0.976341,
+            "1": 0.847664,
+            "2": 0.894851,
+            "3": 0.876762,
+            "4": 0.883974,
+            "5": 0.895992,
+            "6": 0.970301,
+            "7": 1.002086,
+            "8": 1.014851,
+            "9": 1.092771,
+            "10": 1.238569,
+            "11": 1.305836
+          }
+        }
+      },
+      {
+        "prompt": "The most important scientific discovery of the 21st century was",
+        "text": " the discovery of the first atomic bomb. The first atomic bomb was detonated in Hiroshima, Japan, on August 7, 1945. The bomb was the first to be",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 384,
+          "tokens_observed": 32,
+          "interventions_per_token": 12.0,
+          "top_layers": [
+            {
+              "layer": 0,
+              "count": 32,
+              "mean_scale": 0.984902,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 32,
+              "mean_scale": 0.852794,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 32,
+              "mean_scale": 0.891324,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 32,
+              "mean_scale": 0.868617,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 32,
+              "mean_scale": 0.882199,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 32,
+              "mean_scale": 0.937101,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 32,
+              "mean_scale": 0.949326,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 32,
+              "mean_scale": 0.993088,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 32,
+              "mean_scale": 1.020404,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 32,
+              "mean_scale": 1.094426,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            }
+          },
+          "mean_scales": {
+            "0": 0.984902,
+            "1": 0.852794,
+            "2": 0.891324,
+            "3": 0.868617,
+            "4": 0.882199,
+            "5": 0.937101,
+            "6": 0.949326,
+            "7": 0.993088,
+            "8": 1.020404,
+            "9": 1.094426,
+            "10": 1.227124,
+            "11": 1.298694
+          }
+        }
+      }
+    ],
+    "hybrid": [
+      {
+        "prompt": "The key to understanding deep learning is",
+        "text": " to understand how it works.\n\nDeep learning is a technique that allows you to learn a set of concepts and then apply them to a set of data.",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 723,
+          "tokens_observed": 32,
+          "interventions_per_token": 22.59375,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 64,
+              "mean_scale": 1.091543,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 10,
+              "count": 63,
+              "mean_scale": 0.942576,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 62,
+              "mean_scale": 0.97855,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 61,
+              "mean_scale": 1.02177,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 61,
+              "mean_scale": 0.982617,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 61,
+              "mean_scale": 0.992371,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 60,
+              "mean_scale": 0.973798,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 59,
+              "mean_scale": 1.006093,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 58,
+              "mean_scale": 0.958597,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 8,
+              "count": 58,
+              "mean_scale": 1.043959,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 156
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 151
+            },
+            "2": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            },
+            "3": {
+              "rule": "attn_norms relative_above 2.5",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 1.015249,
+            "1": 0.920872,
+            "2": 0.924956,
+            "3": 0.950941,
+            "4": 0.948114,
+            "5": 0.981707,
+            "6": 0.984983,
+            "7": 1.023757,
+            "8": 1.049676,
+            "9": 1.007187,
+            "10": 1.003196,
+            "11": 1.003039
+          }
+        }
+      },
+      {
+        "prompt": "In the year 2050, artificial intelligence will",
+        "text": " be the dominant technology in the world.\n\nThe world's population will grow by about 1.5 billion by 2050, according to the World Bank.\n",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 724,
+          "tokens_observed": 32,
+          "interventions_per_token": 22.625,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 64,
+              "mean_scale": 1.089816,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 63,
+              "mean_scale": 0.991262,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 1,
+              "count": 62,
+              "mean_scale": 0.973255,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 62,
+              "mean_scale": 0.989903,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 10,
+              "count": 62,
+              "mean_scale": 0.957423,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 61,
+              "mean_scale": 1.007271,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 60,
+              "mean_scale": 0.999194,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 60,
+              "mean_scale": 1.017116,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 60,
+              "mean_scale": 0.972725,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 59,
+              "mean_scale": 1.004902,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 163
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 145
+            },
+            "2": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            },
+            "3": {
+              "rule": "attn_norms relative_above 2.5",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 0.986547,
+            "1": 0.925682,
+            "2": 0.957938,
+            "3": 0.976269,
+            "4": 0.967788,
+            "5": 0.97261,
+            "6": 0.990988,
+            "7": 1.017092,
+            "8": 1.03651,
+            "9": 1.001359,
+            "10": 1.022507,
+            "11": 1.001452
+          }
+        }
+      },
+      {
+        "prompt": "The most important scientific discovery of the 21st century was",
+        "text": " the discovery of the first atomic bomb. The first atomic bomb was detonated in the United States on September 11, 2001. The first atomic bomb was detonated in the",
+        "final_entropy": null,
+        "n_snapshots": 32,
+        "report": {
+          "total_interventions": 703,
+          "tokens_observed": 32,
+          "interventions_per_token": 21.96875,
+          "top_layers": [
+            {
+              "layer": 11,
+              "count": 64,
+              "mean_scale": 1.081144,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 0,
+              "count": 63,
+              "mean_scale": 1.025595,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 10,
+              "count": 63,
+              "mean_scale": 0.942649,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 6,
+              "count": 61,
+              "mean_scale": 1.049518,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 9,
+              "count": 60,
+              "mean_scale": 0.99026,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 2,
+              "count": 59,
+              "mean_scale": 0.960007,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 5,
+              "count": 58,
+              "mean_scale": 0.997571,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 4,
+              "count": 57,
+              "mean_scale": 0.941381,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 3,
+              "count": 56,
+              "mean_scale": 0.950119,
+              "layer_type": "unknown"
+            },
+            {
+              "layer": 7,
+              "count": 56,
+              "mean_scale": 1.01142,
+              "layer_type": "unknown"
+            }
+          ],
+          "rule_activity": {
+            "0": {
+              "rule": "entropy_reduction above 0.1",
+              "triggers": 140
+            },
+            "1": {
+              "rule": "entropy_reduction below -0.05",
+              "triggers": 147
+            },
+            "2": {
+              "rule": "dilution_survival above 0.0",
+              "triggers": 384
+            },
+            "3": {
+              "rule": "attn_norms relative_above 2.5",
+              "triggers": 32
+            }
+          },
+          "mean_scales": {
+            "0": 1.024141,
+            "1": 0.925198,
+            "2": 0.930014,
+            "3": 0.920208,
+            "4": 0.906835,
+            "5": 0.980598,
+            "6": 1.030643,
+            "7": 1.004985,
+            "8": 1.037426,
+            "9": 1.019237,
+            "10": 1.003341,
+            "11": 0.993484
+          }
+        }
+      }
+    ]
+  }
+}

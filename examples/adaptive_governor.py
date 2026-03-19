@@ -70,7 +70,7 @@ PROMPTS = [
 def run_benchmark(model, tokenizer, gov, device, max_tokens, prompts):
     """Run prompts and report."""
     for i, prompt_text in enumerate(prompts):
-        prompt = f"Question: {prompt_text}\nAnswer:"
+        prompt = f"{prompt_text}\n\n"
         print(f"\n{'─'*60}")
         print(f"  PROMPT {i+1}: {prompt_text[:60]}...")
         print(f"{'─'*60}")
@@ -110,7 +110,7 @@ def run_chat(model, tokenizer, gov, device, max_tokens):
         if not user:
             continue
 
-        prompt = f"Question: {user}\nAnswer:"
+        prompt = f"{user}\n\n"
         t0 = time.time()
         response = generate(model, tokenizer, prompt, device, max_tokens)
         elapsed = time.time() - t0

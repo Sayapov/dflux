@@ -1,3 +1,88 @@
+# Adaptive Governor Implementation Plan
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+
+**Goal:** Build a real-time adaptive governor that uses hybrid signals (dilution_survival + entropy_cascade + attn/MLP ratio) with windowed updates every 32 tokens and gradient-free scale optimization with hard mode-switch triggers.
+
+**Architecture:** Extends `LiveGovernor` with a new `AdaptiveGovernor` class. Instead of per-token rule evaluation, it collects signal windows over N tokens, computes EMA-smoothed statistics, and adjusts per-layer scales using gradient-free optimization toward a target profile. Hard triggers detect pathological states (entropy explosion, residual stream flooding) and switch to protective profiles.
+
+**Tech Stack:** Python, PyTorch, existing dflux infrastructure (MultiScaleTelemetry, LiveGovernor, profile.py)
+
+---
+
+### Task 1: Signal Window Accumulator
+
+**Files:**
+- Create: `src/dflux/adaptive_governor.py`
+- Test: `tests/test_adaptive_governor.py`
+
+**Step 1: Write the failing test**
+
+```python
+# tests/test_adaptive_governor.py
+"""Tests for AdaptiveGovernor signal window and scale logic."""
+
+import pytest
+import math
+
+
+def test_signal_window_accumulates():
+    """SignalWindow collects values and computes stats over a window."""
+    from dflux.adaptive_governor import SignalWindow
+
+    win = SignalWindow(size=4, n_layers=3)
+    # Add 4 snapshots of 3-layer signals
+    win.push([1.0, 2.0, 3.0])
+    win.push([1.5, 2.5, 3.5])
+    win.push([1.2, 2.2, 3.2])
+    win.push([1.8, 2.8, 3.8])
+
+    assert win.is_full()
+    stats = win.stats()
+    # Mean of layer 0: (1.0+1.5+1.2+1.8)/4 = 1.375
+    assert abs(stats["mean"][0] - 1.375) < 1e-6
+    # Mean of layer 2: (3.0+3.5+3.2+3.8)/4 = 3.375
+    assert abs(stats["mean"][2] - 3.375) < 1e-6
+    # Std should be > 0
+    assert stats["std"][0] > 0
+    # Trend: positive (values generally increasing)
+    assert "trend" in stats
+
+
+def test_signal_window_rolls():
+    """Window drops oldest values when full."""
+    from dflux.adaptive_governor import SignalWindow
+
+    win = SignalWindow(size=2, n_layers=2)
+    win.push([1.0, 2.0])
+    win.push([3.0, 4.0])
+    assert win.is_full()
+
+    win.push([5.0, 6.0])  # should drop [1.0, 2.0]
+    stats = win.stats()
+    # Mean of layer 0: (3.0+5.0)/2 = 4.0
+    assert abs(stats["mean"][0] - 4.0) < 1e-6
+
+
+def test_signal_window_not_full():
+    """Stats return None when window is not full."""
+    from dflux.adaptive_governor import SignalWindow
+
+    win = SignalWindow(size=4, n_layers=2)
+    win.push([1.0, 2.0])
+    assert not win.is_full()
+    assert win.stats() is None
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: FAIL with ImportError
+
+**Step 3: Write minimal implementation**
+
+```python
+# src/dflux/adaptive_governor.py
 """
 AdaptiveGovernor — windowed, EMA-tracked, multi-signal adaptive scaling.
 
@@ -36,6 +121,8 @@ import torch.nn as nn
 from .multiscale_telemetry import MultiScaleTelemetry, TelemetryConfig, TokenSnapshot
 from .live_governor import GovernorRule, GovernorIntervention
 
+
+# ── Signal Window ──────────────────────────────────────────────────
 
 class SignalWindow:
     """Rolling window of per-layer signal values.
@@ -111,8 +198,70 @@ class SignalWindow:
 
     def clear(self) -> None:
         self._buf.clear()
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: 3 passed
+
+**Step 5: Commit**
+
+```bash
+git add src/dflux/adaptive_governor.py tests/test_adaptive_governor.py
+git commit -m "feat: add SignalWindow accumulator for adaptive governor"
+```
+
+---
+
+### Task 2: EMA Tracker
+
+**Files:**
+- Modify: `src/dflux/adaptive_governor.py`
+- Test: `tests/test_adaptive_governor.py`
+
+**Step 1: Write the failing test**
+
+```python
+def test_ema_tracker_smooths():
+    """EMATracker applies exponential moving average to signal stats."""
+    from dflux.adaptive_governor import EMATracker
+
+    ema = EMATracker(n_layers=2, alpha=0.5)
+    # First update seeds the EMA
+    ema.update({"mean": [1.0, 2.0], "std": [0.1, 0.2], "trend": [0.0, 0.0],
+                "min": [0.9, 1.8], "max": [1.1, 2.2]})
+    assert abs(ema.mean[0] - 1.0) < 1e-6
+
+    # Second update: EMA = alpha * new + (1-alpha) * old
+    ema.update({"mean": [3.0, 4.0], "std": [0.3, 0.4], "trend": [0.1, 0.1],
+                "min": [2.8, 3.8], "max": [3.2, 4.2]})
+    # 0.5 * 3.0 + 0.5 * 1.0 = 2.0
+    assert abs(ema.mean[0] - 2.0) < 1e-6
+    # 0.5 * 4.0 + 0.5 * 2.0 = 3.0
+    assert abs(ema.mean[1] - 3.0) < 1e-6
 
 
+def test_ema_tracker_trend():
+    """EMATracker tracks smoothed trend."""
+    from dflux.adaptive_governor import EMATracker
+
+    ema = EMATracker(n_layers=1, alpha=1.0)  # alpha=1 means no smoothing
+    ema.update({"mean": [5.0], "std": [0.1], "trend": [0.5],
+                "min": [4.5], "max": [5.5]})
+    assert abs(ema.trend[0] - 0.5) < 1e-6
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py::test_ema_tracker_smooths -v`
+Expected: FAIL with ImportError
+
+**Step 3: Write minimal implementation**
+
+Append to `src/dflux/adaptive_governor.py`:
+
+```python
 # ── EMA Tracker ────────────────────────────────────────────────────
 
 class EMATracker:
@@ -165,8 +314,114 @@ class EMATracker:
         self.std = [0.0] * self.n_layers
         self.trend = [0.0] * self.n_layers
         self._initialized = False
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: 5 passed
+
+**Step 5: Commit**
+
+```bash
+git add src/dflux/adaptive_governor.py tests/test_adaptive_governor.py
+git commit -m "feat: add EMATracker for smoothed signal tracking"
+```
+
+---
+
+### Task 3: Scale Optimizer (gradient-free)
+
+**Files:**
+- Modify: `src/dflux/adaptive_governor.py`
+- Test: `tests/test_adaptive_governor.py`
+
+**Step 1: Write the failing test**
+
+```python
+def test_scale_optimizer_nudges_toward_target():
+    """ScaleOptimizer nudges current scales toward target based on signals."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=3,
+        target_scales={0: 1.2, 1: 0.9, 2: 1.0},
+        learning_rate=0.1,
+        min_scale=0.5,
+        max_scale=2.0,
+    )
+
+    # Start at 1.0, target is 1.2 for layer 0
+    current = {0: 1.0, 1: 1.0, 2: 1.0}
+    # Signal says layer 0 dilution is low (needs boost) - aligns with target
+    signals = {
+        "dilution_mean": [0.3, 0.7, 0.5],
+        "entropy_mean": [0.5, 0.3, 0.4],
+        "ratio_mean": [1.0, 1.0, 1.0],
+    }
+
+    new_scales = opt.step(current, signals)
+    # Layer 0 should move toward 1.2 (increase)
+    assert new_scales[0] > 1.0
+    # Layer 1 should move toward 0.9 (decrease)
+    assert new_scales[1] < 1.0
+    # All within bounds
+    for s in new_scales.values():
+        assert 0.5 <= s <= 2.0
 
 
+def test_scale_optimizer_respects_bounds():
+    """ScaleOptimizer clamps to min/max."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=1,
+        target_scales={0: 5.0},  # way above max
+        learning_rate=1.0,       # aggressive
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+
+    current = {0: 1.4}
+    signals = {"dilution_mean": [0.1], "entropy_mean": [0.5], "ratio_mean": [1.0]}
+    new_scales = opt.step(current, signals)
+    assert new_scales[0] <= 1.5
+
+
+def test_scale_optimizer_no_target_stays_signal_driven():
+    """Without target profile, optimizer is purely signal-driven."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=2,
+        target_scales=None,
+        learning_rate=0.1,
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+
+    current = {0: 1.0, 1: 1.0}
+    # Layer 0: low dilution survival → boost; Layer 1: high → leave alone
+    signals = {
+        "dilution_mean": [0.2, 0.8],
+        "entropy_mean": [0.5, 0.5],
+        "ratio_mean": [1.0, 1.0],
+    }
+    new_scales = opt.step(current, signals)
+    # Low dilution = low survival = needs amplification
+    assert new_scales[0] > 1.0
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py::test_scale_optimizer_nudges_toward_target -v`
+Expected: FAIL with ImportError
+
+**Step 3: Write minimal implementation**
+
+Append to `src/dflux/adaptive_governor.py`:
+
+```python
 # ── Scale Optimizer ────────────────────────────────────────────────
 
 class ScaleOptimizer:
@@ -267,6 +522,7 @@ class ScaleOptimizer:
 
             # ── Signal-driven direction ──
             # Low dilution survival → layer's work gets wasted → boost it
+            # (invert: low survival = high need for boost)
             dilution_drive = 1.0 - dilution_n[i] if i < len(dilution_n) else 0.0
             # High entropy reduction → layer is doing useful compression → boost
             entropy_drive = entropy_n[i] if i < len(entropy_n) else 0.0
@@ -297,8 +553,97 @@ class ScaleOptimizer:
             new_scales[i] = new
 
         return new_scales
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: 8 passed
+
+**Step 5: Commit**
+
+```bash
+git add src/dflux/adaptive_governor.py tests/test_adaptive_governor.py
+git commit -m "feat: add ScaleOptimizer with hybrid signals and compass pull"
+```
+
+---
+
+### Task 4: Mode Triggers (hard switches)
+
+**Files:**
+- Modify: `src/dflux/adaptive_governor.py`
+- Test: `tests/test_adaptive_governor.py`
+
+**Step 1: Write the failing test**
+
+```python
+def test_mode_trigger_detects_entropy_explosion():
+    """ModeTrigger fires when entropy exceeds threshold across layers."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="entropy_explosion",
+        signal="entropy_mean",
+        condition="mean_above",
+        threshold=1.0,
+        min_layers_triggered=3,
+    )
+
+    # Normal: below threshold
+    signals = {"entropy_mean": [0.5, 0.6, 0.7, 0.8]}
+    assert not trigger.check(signals)
+
+    # Explosion: most layers above threshold
+    signals = {"entropy_mean": [1.2, 1.5, 0.8, 1.3]}
+    assert trigger.check(signals)
 
 
+def test_mode_trigger_detects_residual_flood():
+    """ModeTrigger fires when one layer's signal is N× the mean."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="residual_flood",
+        signal="dilution_mean",
+        condition="any_above_relative",
+        threshold=2.5,  # any layer > 2.5× mean
+    )
+
+    # Normal spread
+    signals = {"dilution_mean": [0.5, 0.6, 0.55, 0.5]}
+    assert not trigger.check(signals)
+
+    # One layer floods
+    signals = {"dilution_mean": [0.3, 0.3, 2.0, 0.3]}
+    assert trigger.check(signals)
+
+
+def test_mode_trigger_returns_protective_profile():
+    """When triggered, ModeTrigger provides a protective scale profile."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="test",
+        signal="entropy_mean",
+        condition="mean_above",
+        threshold=1.0,
+        protective_scales={3: 0.8, 7: 0.8},
+    )
+
+    assert trigger.protective_scales == {3: 0.8, 7: 0.8}
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py::test_mode_trigger_detects_entropy_explosion -v`
+Expected: FAIL with ImportError
+
+**Step 3: Write minimal implementation**
+
+Append to `src/dflux/adaptive_governor.py`:
+
+```python
 # ── Mode Triggers ──────────────────────────────────────────────────
 
 @dataclass
@@ -360,13 +705,120 @@ class ModeTrigger:
             return count >= self.min_layers_triggered
 
         return False
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: 11 passed
+
+**Step 5: Commit**
+
+```bash
+git add src/dflux/adaptive_governor.py tests/test_adaptive_governor.py
+git commit -m "feat: add ModeTrigger for hard pathological state detection"
+```
+
+---
+
+### Task 5: AdaptiveGovernor Main Class
+
+**Files:**
+- Modify: `src/dflux/adaptive_governor.py`
+- Test: `tests/test_adaptive_governor.py`
+
+**Step 1: Write the failing test**
+
+```python
+def test_adaptive_governor_init():
+    """AdaptiveGovernor can be instantiated with config."""
+    from dflux.adaptive_governor import AdaptiveGovernor, AdaptiveConfig
+
+    cfg = AdaptiveConfig(
+        window_size=32,
+        ema_alpha=0.3,
+        learning_rate=0.1,
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+    # Can't test with real model here, just test config
+    assert cfg.window_size == 32
+    assert cfg.ema_alpha == 0.3
 
 
+def test_adaptive_governor_tick_logic():
+    """AdaptiveGovernor._adaptive_tick processes window → EMA → optimizer."""
+    from dflux.adaptive_governor import (
+        AdaptiveGovernor, AdaptiveConfig, SignalWindow,
+        EMATracker, ScaleOptimizer
+    )
+
+    # Unit test the tick logic without a real model
+    cfg = AdaptiveConfig(window_size=4, learning_rate=0.1)
+
+    # Simulate: fill 3 signal windows, verify optimizer gets called
+    n_layers = 3
+    win_d = SignalWindow(size=4, n_layers=n_layers)
+    win_e = SignalWindow(size=4, n_layers=n_layers)
+    win_r = SignalWindow(size=4, n_layers=n_layers)
+
+    for _ in range(4):
+        win_d.push([0.5, 0.3, 0.7])  # dilution
+        win_e.push([0.2, 0.4, 0.1])  # entropy reduction
+        win_r.push([1.0, 1.2, 0.8])  # ratio
+
+    assert win_d.is_full()
+
+    ema_d = EMATracker(n_layers, alpha=0.3)
+    ema_d.update(win_d.stats())
+
+    opt = ScaleOptimizer(n_layers=n_layers, learning_rate=0.1)
+    current = {0: 1.0, 1: 1.0, 2: 1.0}
+    new = opt.step(current, {
+        "dilution_mean": ema_d.mean,
+        "entropy_mean": [0.2, 0.4, 0.1],
+        "ratio_mean": [1.0, 1.2, 0.8],
+    })
+
+    # Should produce different scales
+    assert any(abs(new[i] - 1.0) > 0.001 for i in range(n_layers))
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py::test_adaptive_governor_init -v`
+Expected: FAIL with ImportError
+
+**Step 3: Write minimal implementation**
+
+Append to `src/dflux/adaptive_governor.py`:
+
+```python
 # ── Adaptive Config ────────────────────────────────────────────────
 
 @dataclass
 class AdaptiveConfig:
-    """Configuration for the AdaptiveGovernor."""
+    """Configuration for the AdaptiveGovernor.
+
+    Parameters
+    ----------
+    window_size : int
+        Number of tokens per signal window (default 32).
+    ema_alpha : float
+        EMA smoothing factor (default 0.3).
+    learning_rate : float
+        Scale adjustment rate per window (default 0.1).
+    min_scale : float
+        Minimum per-layer scale (default 0.75).
+    max_scale : float
+        Maximum per-layer scale (default 1.5).
+    compass_weight : float
+        Weight of target profile pull vs signal-driven (0-1).
+    signal_weights : dict | None
+        Relative weights for dilution, entropy, ratio signals.
+    enable_triggers : bool
+        Whether to enable hard mode triggers.
+    """
     window_size: int = 32
     ema_alpha: float = 0.3
     learning_rate: float = 0.1
@@ -375,7 +827,6 @@ class AdaptiveConfig:
     compass_weight: float = 0.4
     signal_weights: Optional[Dict[str, float]] = None
     enable_triggers: bool = True
-    trigger_warmup_windows: int = 3  # skip triggers for first N windows
 
 
 # ── Adaptive Governor ──────────────────────────────────────────────
@@ -388,6 +839,10 @@ class AdaptiveGovernor:
       2. Computes EMA-smoothed statistics
       3. Runs gradient-free optimization to adjust per-layer scales
       4. Checks hard triggers for pathological states
+
+    The governor hooks into the model the same way LiveGovernor does:
+    mutable scale tensors on o_proj via forward hooks, patched telemetry
+    callback to fire the governor tick after each token.
     """
 
     SIGNALS = ("dilution_survival", "entropy_reduction", "mlp_attn_ratio")
@@ -432,12 +887,6 @@ class AdaptiveGovernor:
         self._scale_hooks: List = []
         self._install_scale_hooks(model)
 
-        # ── Initialize scales from target profile (don't start cold) ──
-        if target_scales:
-            for i, scale_val in target_scales.items():
-                if i in self._scales:
-                    self._scales[i].fill_(scale_val)
-
         # ── Signal windows ──
         self._windows: Dict[str, SignalWindow] = {
             sig: SignalWindow(self.config.window_size, self.n_layers)
@@ -478,7 +927,7 @@ class AdaptiveGovernor:
         self.optimization_log: List[Dict] = []
 
     def _default_triggers(self) -> List[ModeTrigger]:
-        """Default hard triggers based on experimental findings."""
+        """Default hard triggers based on our experimental findings."""
         return [
             ModeTrigger(
                 name="entropy_explosion",
@@ -486,7 +935,7 @@ class AdaptiveGovernor:
                 condition="mean_above",
                 threshold=1.0,
                 min_layers_triggered=3,
-                protective_scales=None,
+                protective_scales=None,  # reset to 1.0
                 cooldown=3,
             ),
             ModeTrigger(
@@ -500,7 +949,7 @@ class AdaptiveGovernor:
         ]
 
     def _install_scale_hooks(self, model: nn.Module) -> None:
-        """Install mutable scale hooks on o_proj."""
+        """Install mutable scale hooks on o_proj (same pattern as LiveGovernor)."""
         layers = self._transformer_layers
         device = next(model.parameters()).device
 
@@ -537,6 +986,7 @@ class AdaptiveGovernor:
         self._original_complete()
         self._token_count += 1
 
+        # Extract signals from latest snapshot
         if not self.telem.snapshots:
             return
         snapshot = self.telem.snapshots[-1]
@@ -567,26 +1017,24 @@ class AdaptiveGovernor:
         """Optimization step: runs every window_size tokens."""
         self._window_count += 1
 
-        # Compute window stats and update EMAs
+        # ── Compute window stats and update EMAs ──
         for sig_name in self.SIGNALS:
             stats = self._windows[sig_name].stats()
             if stats is not None:
                 self._emas[sig_name].update(stats)
 
-        # Check hard triggers (skip during warmup — signals are noisy)
-        if (self.config.enable_triggers
-                and self._window_count > self.config.trigger_warmup_windows
-                and self._check_triggers()):
-            return
+        # ── Check hard triggers ──
+        if self.config.enable_triggers and self._check_triggers():
+            return  # triggers applied protective scales, skip optimization
 
-        # Protective cooldown
+        # ── Protective cooldown ──
         if self._protective_cooldown > 0:
             self._protective_cooldown -= 1
             if self._protective_cooldown == 0:
                 self._in_protective_mode = False
             return
 
-        # Gradient-free optimization step
+        # ── Gradient-free optimization step ──
         current_scales = {i: self._scales[i].item() for i in range(self.n_layers)}
 
         signals = {}
@@ -601,10 +1049,12 @@ class AdaptiveGovernor:
 
         new_scales = self._optimizer.step(current_scales, signals)
 
+        # Apply new scales
         for i, scale_val in new_scales.items():
             if i in self._scales:
                 self._scales[i].fill_(scale_val)
 
+        # Log
         self.optimization_log.append({
             "window": self._window_count,
             "token": self._token_count,
@@ -637,11 +1087,8 @@ class AdaptiveGovernor:
             for i, scale_val in trigger.protective_scales.items():
                 if i in self._scales:
                     self._scales[i].fill_(scale_val)
-        elif self.target_scales:
-            # Fall back to target profile, not 1.0
-            for i, s in self._scales.items():
-                s.fill_(self.target_scales.get(i, 1.0))
         else:
+            # Reset to 1.0
             for s in self._scales.values():
                 s.fill_(1.0)
 
@@ -664,7 +1111,10 @@ class AdaptiveGovernor:
         config: Optional[AdaptiveConfig] = None,
         **kwargs,
     ) -> "AdaptiveGovernor":
-        """Create governor with target scales from a JSON profile."""
+        """Create governor with target scales from a JSON profile.
+
+        The profile's scales become the "compass" the optimizer nudges toward.
+        """
         from .profile import load_profile
         profile = load_profile(profile_path)
         target_scales = {int(k): float(v) for k, v in profile["scales"].items()}
@@ -717,27 +1167,27 @@ class AdaptiveGovernor:
         print(f"  Triggers fired:       {r['triggers_fired']}")
         if r['trigger_details']:
             for t in r['trigger_details']:
-                print(f"    ! {t['trigger']} at token {t['token']}")
+                print(f"    ⚠ {t['trigger']} at token {t['token']}")
 
         if r.get("mean_scales"):
-            print(f"\n  -- Mean Scale Per Layer --")
+            print(f"\n  ── Mean Scale Per Layer ──")
             for i in sorted(r["mean_scales"].keys()):
                 s = r["mean_scales"][i]
                 if abs(s - 1.0) > 0.001:
                     lt = ""
                     if self.layer_types and i < len(self.layer_types):
                         lt = f" [{self.layer_types[i][:3]}]"
-                    direction = "^" if s > 1.0 else "v"
+                    direction = "↑" if s > 1.0 else "↓"
                     print(f"  L{i:>2}{lt}: {s:.4f} {direction}")
 
-        print(f"\n  -- Final Scales --")
+        print(f"\n  ── Final Scales ──")
         for i in sorted(r["final_scales"].keys()):
             s = r["final_scales"][i]
             if abs(s - 1.0) > 0.001:
                 lt = ""
                 if self.layer_types and i < len(self.layer_types):
                     lt = f" [{self.layer_types[i][:3]}]"
-                direction = "^" if s > 1.0 else "v"
+                direction = "↑" if s > 1.0 else "↓"
                 print(f"  L{i:>2}{lt}: {s:.4f} {direction}")
 
     # ── Cleanup ────────────────────────────────────────────────────
@@ -767,3 +1217,332 @@ class AdaptiveGovernor:
         self.telem.detach()
         for s in self._scales.values():
             s.fill_(1.0)
+```
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: 13 passed
+
+**Step 5: Commit**
+
+```bash
+git add src/dflux/adaptive_governor.py tests/test_adaptive_governor.py
+git commit -m "feat: add AdaptiveGovernor main class with windowed optimization"
+```
+
+---
+
+### Task 6: Module Exports
+
+**Files:**
+- Modify: `src/dflux/__init__.py`
+
+**Step 1: Check current exports**
+
+Run: `cat src/dflux/__init__.py`
+
+**Step 2: Add AdaptiveGovernor to exports**
+
+Add to the imports and `__all__`:
+
+```python
+from .adaptive_governor import AdaptiveGovernor, AdaptiveConfig, SignalWindow, EMATracker, ScaleOptimizer, ModeTrigger
+```
+
+**Step 3: Commit**
+
+```bash
+git add src/dflux/__init__.py
+git commit -m "feat: export AdaptiveGovernor from dflux package"
+```
+
+---
+
+### Task 7: Example Script
+
+**Files:**
+- Create: `examples/adaptive_governor.py`
+
+**Step 1: Write the example script**
+
+```python
+#!/usr/bin/env python3
+"""
+Adaptive Governor Demo — windowed, EMA-tracked, multi-signal scaling.
+=====================================================================
+
+Runs the adaptive governor on Qwen3.5-9B with configurable modes:
+
+  --mode compass     Use dilution_survival 0.8 profile as target (recommended)
+  --mode signal      Pure signal-driven, no target profile
+  --mode chat        Interactive chat with adaptive governor active
+
+Usage:
+    python examples/adaptive_governor.py --device mps --dtype bfloat16
+    python examples/adaptive_governor.py --mode signal --window 16
+    python examples/adaptive_governor.py --mode chat --device mps
+"""
+
+import sys, os, json, argparse, time, gc
+
+_src = os.path.join(os.path.dirname(__file__), "..", "src")
+if os.path.isdir(_src):
+    sys.path.insert(0, _src)
+
+import torch
+from transformers import AutoTokenizer, AutoConfig
+
+from dflux.adaptive_governor import AdaptiveGovernor, AdaptiveConfig
+
+
+def load_model(model_name, device, dtype):
+    """Load model (handles Qwen3.5 key remapping)."""
+    # Reuse the proven loader from head_ablation.py
+    config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
+    is_qwen35 = getattr(config, "model_type", "") == "qwen3_5"
+
+    if is_qwen35:
+        from examples.head_ablation import load_model as _load
+        return _load(model_name, device, dtype)
+    else:
+        from transformers import AutoModelForCausalLM
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name, torch_dtype=dtype, trust_remote_code=True, device_map=device
+        )
+        model.eval()
+        return model
+
+
+def generate(model, tokenizer, prompt, device, max_tokens=256):
+    """Generate with greedy decoding."""
+    inputs = tokenizer(prompt, return_tensors="pt").to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=max_tokens,
+            do_sample=False,
+            temperature=1.0,
+        )
+    new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+    return tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
+
+
+PROMPTS = [
+    "What is the temperature on the far side of the moon, and what would happen to a cucumber if it suddenly appeared there.",
+    "Write a short poem about a robot who discovers it can dream.",
+    "Solve step by step: If a train travels at 60 mph for 2.5 hours, then at 45 mph for 1.5 hours, what is the total distance?",
+]
+
+
+def run_benchmark(model, tokenizer, gov, device, max_tokens, prompts):
+    """Run prompts and report."""
+    for i, prompt_text in enumerate(prompts):
+        prompt = f"Question: {prompt_text}\nAnswer:"
+        print(f"\n{'─'*60}")
+        print(f"  PROMPT {i+1}: {prompt_text[:60]}...")
+        print(f"{'─'*60}")
+
+        gov.reset()
+        t0 = time.time()
+        response = generate(model, tokenizer, prompt, device, max_tokens)
+        elapsed = time.time() - t0
+
+        words = len(response.split())
+        print(f"  [{words} words, {elapsed:.1f}s]")
+        print(f"  {response[:400]}{'...' if len(response) > 400 else ''}")
+
+        gov.print_report()
+
+
+def run_chat(model, tokenizer, gov, device, max_tokens):
+    """Interactive chat with adaptive governor."""
+    print("\n  Adaptive Governor Chat")
+    print("  Type 'quit' to exit, 'report' for governor stats, 'reset' to reset governor\n")
+
+    while True:
+        try:
+            user = input("You: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if user.lower() == "quit":
+            break
+        if user.lower() == "report":
+            gov.print_report()
+            continue
+        if user.lower() == "reset":
+            gov.reset()
+            print("  Governor reset.\n")
+            continue
+        if not user:
+            continue
+
+        prompt = f"Question: {user}\nAnswer:"
+        t0 = time.time()
+        response = generate(model, tokenizer, prompt, device, max_tokens)
+        elapsed = time.time() - t0
+        words = len(response.split())
+
+        print(f"\nAssistant [{words}w, {elapsed:.1f}s]: {response}\n")
+
+        # Show brief governor status
+        r = gov.report()
+        if r["triggers_fired"] > 0:
+            print(f"  ⚠ {r['triggers_fired']} triggers fired")
+        active = sum(1 for s in r["final_scales"].values() if abs(s - 1.0) > 0.01)
+        print(f"  Governor: {r['windows_processed']} windows, {active} layers adjusted\n")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Adaptive Governor Demo")
+    parser.add_argument("--model", default="Qwen/Qwen3.5-9B-Base")
+    parser.add_argument("--device", default="mps")
+    parser.add_argument("--dtype", default="bfloat16")
+    parser.add_argument("--mode", default="compass", choices=["compass", "signal", "chat"])
+    parser.add_argument("--max-tokens", type=int, default=256)
+    parser.add_argument("--window", type=int, default=32, help="Signal window size")
+    parser.add_argument("--lr", type=float, default=0.1, help="Optimization learning rate")
+    parser.add_argument("--profile", default=None,
+                        help="Path to target profile JSON (for compass mode)")
+    args = parser.parse_args()
+
+    dtype = getattr(torch, args.dtype)
+
+    print("=" * 60)
+    print("  ADAPTIVE GOVERNOR")
+    print("=" * 60)
+    print(f"  Model:      {args.model}")
+    print(f"  Mode:       {args.mode}")
+    print(f"  Window:     {args.window} tokens")
+    print(f"  LR:         {args.lr}")
+    print(f"  Max tokens: {args.max_tokens}")
+    print("=" * 60)
+
+    # Load model
+    print("\n  Loading model...")
+    model = load_model(args.model, args.device, dtype)
+    tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+
+    # Configure
+    cfg = AdaptiveConfig(
+        window_size=args.window,
+        learning_rate=args.lr,
+    )
+
+    # Create governor
+    if args.mode == "signal":
+        gov = AdaptiveGovernor.signal_only(model, tokenizer, config=cfg)
+        print("  Mode: signal-only (no target profile)")
+    else:
+        profile_path = args.profile or "profiles/qwen35_9b_reasoning_dilution_survival_0.8.json"
+        if os.path.exists(profile_path):
+            gov = AdaptiveGovernor.from_profile(model, tokenizer, profile_path, config=cfg)
+            print(f"  Mode: compass → {profile_path}")
+        else:
+            print(f"  ⚠ Profile not found: {profile_path}, falling back to signal-only")
+            gov = AdaptiveGovernor.signal_only(model, tokenizer, config=cfg)
+
+    if args.mode == "chat":
+        run_chat(model, tokenizer, gov, args.device, args.max_tokens)
+    else:
+        run_benchmark(model, tokenizer, gov, args.device, args.max_tokens, PROMPTS)
+
+    gov.detach()
+    print("\n  Done!")
+
+
+if __name__ == "__main__":
+    main()
+```
+
+**Step 2: Test it runs (smoke test)**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -c "from dflux.adaptive_governor import AdaptiveGovernor, AdaptiveConfig; print('Import OK')"`
+Expected: "Import OK"
+
+**Step 3: Commit**
+
+```bash
+git add examples/adaptive_governor.py
+git commit -m "feat: add adaptive governor example script with compass/signal/chat modes"
+```
+
+---
+
+### Task 8: Integration Test with Tiny Model
+
+**Files:**
+- Modify: `tests/test_adaptive_governor.py`
+
+**Step 1: Write integration test**
+
+```python
+def test_adaptive_governor_integration_gpt2():
+    """Integration test: AdaptiveGovernor runs on a tiny model end-to-end."""
+    pytest.importorskip("transformers")
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from dflux.adaptive_governor import AdaptiveGovernor, AdaptiveConfig
+
+    # Use tiny GPT-2 (no download needed in CI with cache, fast locally)
+    model_name = "gpt2"
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+    except Exception:
+        pytest.skip("gpt2 not available")
+
+    model.eval()
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    cfg = AdaptiveConfig(window_size=4, learning_rate=0.1)  # small window for test
+    gov = AdaptiveGovernor.signal_only(model, tokenizer, config=cfg)
+
+    # Generate enough tokens to trigger at least one window
+    input_ids = tokenizer.encode("The quick brown fox", return_tensors="pt")
+    with torch.no_grad():
+        output = model.generate(input_ids, max_new_tokens=16, do_sample=False,
+                                pad_token_id=tokenizer.eos_token_id)
+
+    report = gov.report()
+    assert report["tokens_observed"] > 0
+    # With window_size=4 and 16 tokens, should have at least 1 window
+    assert report["windows_processed"] >= 1
+
+    gov.detach()
+```
+
+**Step 2: Run integration test**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py::test_adaptive_governor_integration_gpt2 -v`
+Expected: PASS (or skip if gpt2 unavailable)
+
+**Step 3: Commit**
+
+```bash
+git add tests/test_adaptive_governor.py
+git commit -m "test: add GPT-2 integration test for AdaptiveGovernor"
+```
+
+---
+
+### Task 9: Run Full Test Suite
+
+**Step 1: Run all adaptive governor tests**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/test_adaptive_governor.py -v`
+Expected: All pass
+
+**Step 2: Run existing tests to check no regressions**
+
+Run: `cd /Users/iskandersayapov/Projects/D-Flux/dflux && python -m pytest tests/ -v --timeout=120`
+Expected: No new failures
+
+**Step 3: Final commit**
+
+```bash
+git add -A
+git commit -m "feat: complete adaptive governor with windowed optimization, EMA tracking, and mode triggers"
+```
