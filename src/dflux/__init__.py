@@ -78,6 +78,14 @@ from dflux.profile import (
     compute_scales,
     blend_scales,
 )
+from dflux.adaptive_governor import (
+    AdaptiveGovernor,
+    AdaptiveConfig,
+    SignalWindow,
+    EMATracker,
+    ScaleOptimizer,
+    ModeTrigger,
+)
 
 try:
     from dflux.eval_model import GovernedHFLM
@@ -100,5 +108,7 @@ __all__ = [
     "LiveGovernor", "GovernorRule", "GovernorIntervention",
     "compute_profile", "save_profile", "load_profile",
     "compute_scales", "blend_scales",
+    "AdaptiveGovernor", "AdaptiveConfig", "SignalWindow",
+    "EMATracker", "ScaleOptimizer", "ModeTrigger",
     "__version__",
 ]
