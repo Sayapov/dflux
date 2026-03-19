@@ -1,0 +1,21 @@
+{
+  "signal": "dilution_survival",
+  "strategy": "ratio",
+  "blend": -0.5,
+  "cap": 2.0,
+  "layer_type_bias": "full_attention",
+  "scales": {
+    "3": 0.8889,
+    "7": 0.9454,
+    "11": 0.9934,
+    "15": 1.0688,
+    "19": 1.0247,
+    "23": 1.0027,
+    "27": 0.9802,
+    "31": 1.0023
+  },
+  "model_family": "Qwen3.5-9B",
+  "description": "INVERSE of reasoning profile — should HURT reasoning. Causality test.",
+  "source_base": "Qwen/Qwen3.5-9B-Base",
+  "source_target": "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled"
+}

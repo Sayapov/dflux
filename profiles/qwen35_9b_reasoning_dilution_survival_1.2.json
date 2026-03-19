@@ -1,0 +1,17 @@
+{
+  "signal": "dilution_survival",
+  "strategy": "ratio",
+  "blend": 1.2,
+  "cap": 2.0,
+  "layer_type_bias": "full_attention",
+  "scales": {
+    "3": 1.5006,
+    "7": 1.2308,
+    "11": 1.0264,
+    "15": 0.75,
+    "19": 0.9035,
+    "23": 0.9894,
+    "27": 1.0807,
+    "31": 0.991
+  }
+}

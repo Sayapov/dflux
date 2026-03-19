@@ -1,0 +1,21 @@
+{
+  "signal": "dilution_survival",
+  "strategy": "ratio",
+  "blend": 0.3,
+  "cap": 2.0,
+  "layer_type_bias": "full_attention",
+  "scales": {
+    "3": 1.1252,
+    "7": 1.0577,
+    "11": 1.0066,
+    "15": 0.9356,
+    "19": 0.9759,
+    "23": 0.9973,
+    "27": 1.0202,
+    "31": 0.9977
+  },
+  "model_family": "Qwen3.5-9B",
+  "description": "Reasoning boost via dilution_survival, full_attention only, blend 0.3",
+  "source_base": "Qwen/Qwen3.5-9B-Base",
+  "source_target": "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled"
+}

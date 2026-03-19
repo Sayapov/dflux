@@ -56,16 +56,16 @@ def _detect_nested_keys(model_name: str) -> bool:
     try:
         idx_path = hf_hub_download(model_name, "model.safetensors.index.json")
         with open(idx_path) as f:
-            first_key = next(iter(json.load(f)["weight_map"].keys()))
-        return "language_model." in first_key
+            keys = json.load(f)["weight_map"].keys()
+        return any("language_model." in k for k in keys)
     except Exception:
         pass
     try:
         from safetensors import safe_open
         path = hf_hub_download(model_name, "model.safetensors")
         with safe_open(path, framework="pt") as f:
-            first_key = next(iter(f.keys()))
-        return "language_model." in first_key
+            keys = f.keys()
+        return any("language_model." in k for k in keys)
     except Exception:
         return True
 

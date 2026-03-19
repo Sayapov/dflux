@@ -71,6 +71,18 @@ from dflux.live_governor import (
     GovernorRule,
     GovernorIntervention,
 )
+from dflux.profile import (
+    compute_profile,
+    save_profile,
+    load_profile,
+    compute_scales,
+    blend_scales,
+)
+
+try:
+    from dflux.eval_model import GovernedHFLM
+except ImportError:
+    GovernedHFLM = None
 
 __all__ = [
     "DFluxMeter", "DFluxConfig",
@@ -86,5 +98,7 @@ __all__ = [
     "MultiScaleTelemetry", "TelemetryConfig", "TokenSnapshot",
     "quick_telemetry",
     "LiveGovernor", "GovernorRule", "GovernorIntervention",
+    "compute_profile", "save_profile", "load_profile",
+    "compute_scales", "blend_scales",
     "__version__",
 ]

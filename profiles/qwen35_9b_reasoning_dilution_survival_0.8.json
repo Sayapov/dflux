@@ -1,0 +1,18 @@
+{
+  "signal": "dilution_survival",
+  "strategy": "ratio",
+  "blend": 0.8,
+  "cap": 2.0,
+  "layer_type_bias": "full_attention",
+  "scales": {
+    "3": 1.3338,
+    "7": 1.1539,
+    "11": 1.0176,
+    "15": 0.8283,
+    "19": 0.9356,
+    "23": 0.9929,
+    "27": 1.0538,
+    "31": 0.994
+  },
+  "model_family": "Qwen3.5-9B"
+}

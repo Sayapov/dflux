@@ -1,0 +1,20 @@
+{
+  "model_family": "Qwen3.5-9B",
+  "description": "Reasoning boost via entropy_reduction \u2014 stronger shift, needs careful blending",
+  "signal": "entropy_reduction",
+  "strategy": "ratio",
+  "blend": 0.5,
+  "cap": 2.0,
+  "layer_type_bias": "full_attention",
+  "scales": {
+    "3": 0.75,
+    "7": 0.770127,
+    "11": 1.5,
+    "15": 0.805652,
+    "19": 1.323427,
+    "23": 1.412147,
+    "27": 1.5
+  },
+  "source_base": "Qwen/Qwen3.5-9B-Base",
+  "source_target": "Jackrong/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled"
+}
