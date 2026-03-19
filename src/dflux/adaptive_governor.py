@@ -297,3 +297,66 @@ class ScaleOptimizer:
             new_scales[i] = new
 
         return new_scales
+
+
+# ── Mode Triggers ──────────────────────────────────────────────────
+
+@dataclass
+class ModeTrigger:
+    """Hard trigger for pathological states.
+
+    When triggered, the governor switches to a protective scale profile
+    instead of the normal optimization loop.
+
+    Parameters
+    ----------
+    name : str
+        Human-readable name for logging.
+    signal : str
+        Which signal to monitor (key in the signals dict).
+    condition : str
+        "mean_above" — mean of signal across layers exceeds threshold.
+        "any_above_relative" — any layer exceeds threshold × mean.
+        "trend_negative" — EMA trend is negative for most layers.
+    threshold : float
+        Trigger threshold.
+    min_layers_triggered : int
+        For "mean_above": how many layers must exceed threshold.
+    protective_scales : dict
+        Scale profile to apply when triggered. If None, scales reset to 1.0.
+    cooldown : int
+        Number of windows to stay in protective mode after trigger.
+    """
+    name: str
+    signal: str
+    condition: str = "mean_above"
+    threshold: float = 1.0
+    min_layers_triggered: int = 3
+    protective_scales: Optional[Dict[int, float]] = None
+    cooldown: int = 3
+    _cooldown_remaining: int = field(default=0, init=False, repr=False)
+
+    def check(self, signals: Dict[str, List[float]]) -> bool:
+        """Check if trigger condition is met."""
+        values = signals.get(self.signal)
+        if values is None:
+            return False
+
+        if self.condition == "mean_above":
+            count = sum(1 for v in values if v > self.threshold)
+            return count >= self.min_layers_triggered
+
+        elif self.condition == "any_above_relative":
+            valid = [v for v in values if v is not None and math.isfinite(v)]
+            if not valid:
+                return False
+            mean_val = sum(valid) / len(valid)
+            if mean_val <= 0:
+                return False
+            return any(v > self.threshold * mean_val for v in valid)
+
+        elif self.condition == "trend_negative":
+            count = sum(1 for v in values if v < -abs(self.threshold))
+            return count >= self.min_layers_triggered
+
+        return False

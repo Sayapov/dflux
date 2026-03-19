@@ -139,3 +139,55 @@ def test_scale_optimizer_no_target_stays_signal_driven():
     new_scales = opt.step(current, signals)
     # Low dilution = low survival = needs amplification
     assert new_scales[0] > 1.0
+
+
+def test_mode_trigger_detects_entropy_explosion():
+    """ModeTrigger fires when entropy exceeds threshold across layers."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="entropy_explosion",
+        signal="entropy_mean",
+        condition="mean_above",
+        threshold=1.0,
+        min_layers_triggered=3,
+    )
+
+    signals = {"entropy_mean": [0.5, 0.6, 0.7, 0.8]}
+    assert not trigger.check(signals)
+
+    signals = {"entropy_mean": [1.2, 1.5, 0.8, 1.3]}
+    assert trigger.check(signals)
+
+
+def test_mode_trigger_detects_residual_flood():
+    """ModeTrigger fires when one layer's signal is N× the mean."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="residual_flood",
+        signal="dilution_mean",
+        condition="any_above_relative",
+        threshold=2.5,
+    )
+
+    signals = {"dilution_mean": [0.5, 0.6, 0.55, 0.5]}
+    assert not trigger.check(signals)
+
+    signals = {"dilution_mean": [0.3, 0.3, 2.0, 0.3]}
+    assert trigger.check(signals)
+
+
+def test_mode_trigger_returns_protective_profile():
+    """When triggered, ModeTrigger provides a protective scale profile."""
+    from dflux.adaptive_governor import ModeTrigger
+
+    trigger = ModeTrigger(
+        name="test",
+        signal="entropy_mean",
+        condition="mean_above",
+        threshold=1.0,
+        protective_scales={3: 0.8, 7: 0.8},
+    )
+
+    assert trigger.protective_scales == {3: 0.8, 7: 0.8}
