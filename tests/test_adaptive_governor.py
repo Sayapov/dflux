@@ -191,3 +191,50 @@ def test_mode_trigger_returns_protective_profile():
     )
 
     assert trigger.protective_scales == {3: 0.8, 7: 0.8}
+
+
+def test_adaptive_governor_config():
+    """AdaptiveConfig can be instantiated with defaults."""
+    from dflux.adaptive_governor import AdaptiveConfig
+
+    cfg = AdaptiveConfig(
+        window_size=32,
+        ema_alpha=0.3,
+        learning_rate=0.1,
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+    assert cfg.window_size == 32
+    assert cfg.ema_alpha == 0.3
+
+
+def test_adaptive_governor_tick_logic():
+    """Unit test the optimization pipeline: window → EMA → optimizer."""
+    from dflux.adaptive_governor import (
+        SignalWindow, EMATracker, ScaleOptimizer
+    )
+
+    n_layers = 3
+    win_d = SignalWindow(size=4, n_layers=n_layers)
+    win_e = SignalWindow(size=4, n_layers=n_layers)
+    win_r = SignalWindow(size=4, n_layers=n_layers)
+
+    for _ in range(4):
+        win_d.push([0.5, 0.3, 0.7])
+        win_e.push([0.2, 0.4, 0.1])
+        win_r.push([1.0, 1.2, 0.8])
+
+    assert win_d.is_full()
+
+    ema_d = EMATracker(n_layers, alpha=0.3)
+    ema_d.update(win_d.stats())
+
+    opt = ScaleOptimizer(n_layers=n_layers, learning_rate=0.1)
+    current = {0: 1.0, 1: 1.0, 2: 1.0}
+    new = opt.step(current, {
+        "dilution_mean": ema_d.mean,
+        "entropy_mean": [0.2, 0.4, 0.1],
+        "ratio_mean": [1.0, 1.2, 0.8],
+    })
+
+    assert any(abs(new[i] - 1.0) > 0.001 for i in range(n_layers))

@@ -360,3 +360,397 @@ class ModeTrigger:
             return count >= self.min_layers_triggered
 
         return False
+
+
+# ── Adaptive Config ────────────────────────────────────────────────
+
+@dataclass
+class AdaptiveConfig:
+    """Configuration for the AdaptiveGovernor."""
+    window_size: int = 32
+    ema_alpha: float = 0.3
+    learning_rate: float = 0.1
+    min_scale: float = 0.75
+    max_scale: float = 1.5
+    compass_weight: float = 0.4
+    signal_weights: Optional[Dict[str, float]] = None
+    enable_triggers: bool = True
+
+
+# ── Adaptive Governor ──────────────────────────────────────────────
+
+class AdaptiveGovernor:
+    """Real-time adaptive governor with windowed signal optimization.
+
+    Instead of evaluating rules every token (like LiveGovernor), this:
+      1. Accumulates signals over a window of N tokens
+      2. Computes EMA-smoothed statistics
+      3. Runs gradient-free optimization to adjust per-layer scales
+      4. Checks hard triggers for pathological states
+    """
+
+    SIGNALS = ("dilution_survival", "entropy_reduction", "mlp_attn_ratio")
+
+    def __init__(
+        self,
+        model: nn.Module,
+        tokenizer: Any,
+        *,
+        config: Optional[AdaptiveConfig] = None,
+        target_scales: Optional[Dict[int, float]] = None,
+        triggers: Optional[List[ModeTrigger]] = None,
+        telemetry_cfg: Optional[TelemetryConfig] = None,
+    ) -> None:
+        self.config = config or AdaptiveConfig()
+        self.target_scales = target_scales
+
+        # ── Telemetry ──
+        if telemetry_cfg is None:
+            telemetry_cfg = TelemetryConfig(
+                logit_lens=True,
+                logit_lens_top_k=5,
+                cross_layer=False,
+                mlp_internals=True,
+                entropy_cascade=True,
+                outlier_detection=False,
+            )
+        self.telem = MultiScaleTelemetry.from_model(model, tokenizer, cfg=telemetry_cfg)
+        self.n_layers = self.telem.n_layers
+
+        # Layer types
+        self._transformer_layers = MultiScaleTelemetry._find_transformer_layers(model)
+        self.layer_types: Optional[List[str]] = None
+        if self._transformer_layers:
+            self.layer_types = [
+                MultiScaleTelemetry._get_layer_type(layer)
+                for layer in self._transformer_layers
+            ]
+
+        # ── Scale hooks (actuator) ──
+        self._scales: Dict[int, torch.Tensor] = {}
+        self._scale_hooks: List = []
+        self._install_scale_hooks(model)
+
+        # ── Signal windows ──
+        self._windows: Dict[str, SignalWindow] = {
+            sig: SignalWindow(self.config.window_size, self.n_layers)
+            for sig in self.SIGNALS
+        }
+
+        # ── EMA trackers ──
+        self._emas: Dict[str, EMATracker] = {
+            sig: EMATracker(self.n_layers, self.config.ema_alpha)
+            for sig in self.SIGNALS
+        }
+
+        # ── Optimizer ──
+        self._optimizer = ScaleOptimizer(
+            n_layers=self.n_layers,
+            target_scales=target_scales,
+            learning_rate=self.config.learning_rate,
+            min_scale=self.config.min_scale,
+            max_scale=self.config.max_scale,
+            compass_weight=self.config.compass_weight,
+            signal_weights=self.config.signal_weights,
+        )
+
+        # ── Triggers ──
+        self.triggers = triggers or self._default_triggers()
+        self._in_protective_mode = False
+        self._protective_cooldown = 0
+
+        # ── Patch telemetry callback ──
+        self._original_complete = self.telem._on_forward_complete
+        self.telem._on_forward_complete = self._on_token_complete
+
+        # ── Logging ──
+        self._token_count = 0
+        self._window_count = 0
+        self.scale_history: List[Dict[int, float]] = []
+        self.trigger_log: List[Dict] = []
+        self.optimization_log: List[Dict] = []
+
+    def _default_triggers(self) -> List[ModeTrigger]:
+        """Default hard triggers based on experimental findings."""
+        return [
+            ModeTrigger(
+                name="entropy_explosion",
+                signal="entropy_mean",
+                condition="mean_above",
+                threshold=1.0,
+                min_layers_triggered=3,
+                protective_scales=None,
+                cooldown=3,
+            ),
+            ModeTrigger(
+                name="residual_flood",
+                signal="dilution_mean",
+                condition="any_above_relative",
+                threshold=2.5,
+                protective_scales=None,
+                cooldown=2,
+            ),
+        ]
+
+    def _install_scale_hooks(self, model: nn.Module) -> None:
+        """Install mutable scale hooks on o_proj."""
+        layers = self._transformer_layers
+        device = next(model.parameters()).device
+
+        for i, layer in enumerate(layers):
+            scale = torch.ones(1, device=device, dtype=torch.float32)
+            self._scales[i] = scale
+
+            attn = MultiScaleTelemetry._find_attn_module(layer)
+            if attn is None:
+                continue
+
+            o_proj = None
+            for name in ("o_proj", "c_proj", "dense", "out_proj"):
+                if hasattr(attn, name):
+                    o_proj = getattr(attn, name)
+                    break
+            if o_proj is None:
+                continue
+
+            def _make_hook(s: torch.Tensor):
+                def hook(module, input, output):
+                    if s.item() == 1.0:
+                        return output
+                    return output * s.to(output.dtype)
+                return hook
+
+            h = o_proj.register_forward_hook(_make_hook(scale))
+            self._scale_hooks.append(h)
+
+    # ── Token callback ─────────────────────────────────────────────
+
+    def _on_token_complete(self) -> None:
+        """Fires after each token's telemetry snapshot."""
+        self._original_complete()
+        self._token_count += 1
+
+        if not self.telem.snapshots:
+            return
+        snapshot = self.telem.snapshots[-1]
+
+        # Push per-layer values into windows
+        for sig_name in self.SIGNALS:
+            values = getattr(snapshot, sig_name, None)
+            if values is not None and isinstance(values, (list, tuple)):
+                self._windows[sig_name].push(values)
+
+        # Record current scales
+        self.scale_history.append({
+            i: self._scales[i].item() for i in range(self.n_layers)
+        })
+
+        # Check if all windows are full → time for optimization step
+        all_full = all(w.is_full() for w in self._windows.values())
+        if not all_full:
+            return
+
+        self._window_tick()
+
+        # Clear windows for next cycle
+        for w in self._windows.values():
+            w.clear()
+
+    def _window_tick(self) -> None:
+        """Optimization step: runs every window_size tokens."""
+        self._window_count += 1
+
+        # Compute window stats and update EMAs
+        for sig_name in self.SIGNALS:
+            stats = self._windows[sig_name].stats()
+            if stats is not None:
+                self._emas[sig_name].update(stats)
+
+        # Check hard triggers
+        if self.config.enable_triggers and self._check_triggers():
+            return
+
+        # Protective cooldown
+        if self._protective_cooldown > 0:
+            self._protective_cooldown -= 1
+            if self._protective_cooldown == 0:
+                self._in_protective_mode = False
+            return
+
+        # Gradient-free optimization step
+        current_scales = {i: self._scales[i].item() for i in range(self.n_layers)}
+
+        signals = {}
+        for sig_name, short in [("dilution_survival", "dilution"),
+                                  ("entropy_reduction", "entropy"),
+                                  ("mlp_attn_ratio", "ratio")]:
+            ema = self._emas[sig_name]
+            if ema.initialized:
+                signals[f"{short}_mean"] = ema.mean
+            else:
+                signals[f"{short}_mean"] = [0.5] * self.n_layers
+
+        new_scales = self._optimizer.step(current_scales, signals)
+
+        for i, scale_val in new_scales.items():
+            if i in self._scales:
+                self._scales[i].fill_(scale_val)
+
+        self.optimization_log.append({
+            "window": self._window_count,
+            "token": self._token_count,
+            "scales": dict(new_scales),
+            "signals": {k: list(v) for k, v in signals.items()},
+        })
+
+    def _check_triggers(self) -> bool:
+        """Check all hard triggers. Returns True if any fired."""
+        signals = {}
+        for sig_name, short in [("dilution_survival", "dilution"),
+                                  ("entropy_reduction", "entropy"),
+                                  ("mlp_attn_ratio", "ratio")]:
+            ema = self._emas[sig_name]
+            if ema.initialized:
+                signals[f"{short}_mean"] = ema.mean
+
+        for trigger in self.triggers:
+            if trigger.check(signals):
+                self._fire_trigger(trigger)
+                return True
+        return False
+
+    def _fire_trigger(self, trigger: ModeTrigger) -> None:
+        """Apply protective scales from a triggered mode switch."""
+        self._in_protective_mode = True
+        self._protective_cooldown = trigger.cooldown
+
+        if trigger.protective_scales:
+            for i, scale_val in trigger.protective_scales.items():
+                if i in self._scales:
+                    self._scales[i].fill_(scale_val)
+        else:
+            for s in self._scales.values():
+                s.fill_(1.0)
+
+        self.trigger_log.append({
+            "window": self._window_count,
+            "token": self._token_count,
+            "trigger": trigger.name,
+            "cooldown": trigger.cooldown,
+        })
+
+    # ── Factory methods ────────────────────────────────────────────
+
+    @classmethod
+    def from_profile(
+        cls,
+        model: nn.Module,
+        tokenizer: Any,
+        profile_path: str,
+        *,
+        config: Optional[AdaptiveConfig] = None,
+        **kwargs,
+    ) -> "AdaptiveGovernor":
+        """Create governor with target scales from a JSON profile."""
+        from .profile import load_profile
+        profile = load_profile(profile_path)
+        target_scales = {int(k): float(v) for k, v in profile["scales"].items()}
+        return cls(model, tokenizer, config=config, target_scales=target_scales, **kwargs)
+
+    @classmethod
+    def signal_only(
+        cls,
+        model: nn.Module,
+        tokenizer: Any,
+        *,
+        config: Optional[AdaptiveConfig] = None,
+        **kwargs,
+    ) -> "AdaptiveGovernor":
+        """Create governor with no target profile — pure signal-driven."""
+        cfg = config or AdaptiveConfig()
+        cfg.compass_weight = 0.0
+        return cls(model, tokenizer, config=cfg, target_scales=None, **kwargs)
+
+    # ── Reporting ──────────────────────────────────────────────────
+
+    def report(self) -> Dict[str, Any]:
+        """Summary of what the governor did."""
+        mean_scales = {}
+        if self.scale_history:
+            for i in range(self.n_layers):
+                scales = [sh.get(i, 1.0) for sh in self.scale_history]
+                mean_scales[i] = sum(scales) / len(scales)
+
+        return {
+            "tokens_observed": self._token_count,
+            "windows_processed": self._window_count,
+            "optimizations": len(self.optimization_log),
+            "triggers_fired": len(self.trigger_log),
+            "trigger_details": self.trigger_log,
+            "mean_scales": mean_scales,
+            "final_scales": {i: self._scales[i].item() for i in range(self.n_layers)},
+            "in_protective_mode": self._in_protective_mode,
+        }
+
+    def print_report(self) -> None:
+        """Print human-readable governor report."""
+        r = self.report()
+        print(f"\n{'='*60}")
+        print(f"  ADAPTIVE GOVERNOR REPORT")
+        print(f"{'='*60}")
+        print(f"  Tokens observed:      {r['tokens_observed']}")
+        print(f"  Windows processed:    {r['windows_processed']}")
+        print(f"  Optimization steps:   {r['optimizations']}")
+        print(f"  Triggers fired:       {r['triggers_fired']}")
+        if r['trigger_details']:
+            for t in r['trigger_details']:
+                print(f"    ! {t['trigger']} at token {t['token']}")
+
+        if r.get("mean_scales"):
+            print(f"\n  -- Mean Scale Per Layer --")
+            for i in sorted(r["mean_scales"].keys()):
+                s = r["mean_scales"][i]
+                if abs(s - 1.0) > 0.001:
+                    lt = ""
+                    if self.layer_types and i < len(self.layer_types):
+                        lt = f" [{self.layer_types[i][:3]}]"
+                    direction = "^" if s > 1.0 else "v"
+                    print(f"  L{i:>2}{lt}: {s:.4f} {direction}")
+
+        print(f"\n  -- Final Scales --")
+        for i in sorted(r["final_scales"].keys()):
+            s = r["final_scales"][i]
+            if abs(s - 1.0) > 0.001:
+                lt = ""
+                if self.layer_types and i < len(self.layer_types):
+                    lt = f" [{self.layer_types[i][:3]}]"
+                direction = "^" if s > 1.0 else "v"
+                print(f"  L{i:>2}{lt}: {s:.4f} {direction}")
+
+    # ── Cleanup ────────────────────────────────────────────────────
+
+    def reset(self) -> None:
+        """Reset scales, windows, EMAs — keep hooks installed."""
+        for s in self._scales.values():
+            s.fill_(1.0)
+        for w in self._windows.values():
+            w.clear()
+        for e in self._emas.values():
+            e.reset()
+        self._token_count = 0
+        self._window_count = 0
+        self.scale_history.clear()
+        self.trigger_log.clear()
+        self.optimization_log.clear()
+        self._in_protective_mode = False
+        self._protective_cooldown = 0
+
+    def detach(self) -> None:
+        """Remove all hooks and restore telemetry callback."""
+        for h in self._scale_hooks:
+            h.remove()
+        self._scale_hooks.clear()
+        self.telem._on_forward_complete = self._original_complete
+        self.telem.detach()
+        for s in self._scales.values():
+            s.fill_(1.0)
