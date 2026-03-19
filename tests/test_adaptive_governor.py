@@ -238,3 +238,36 @@ def test_adaptive_governor_tick_logic():
     })
 
     assert any(abs(new[i] - 1.0) > 0.001 for i in range(n_layers))
+
+
+def test_adaptive_governor_integration_gpt2():
+    """Integration test: AdaptiveGovernor runs on a tiny model end-to-end."""
+    pytest.importorskip("transformers")
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from dflux.adaptive_governor import AdaptiveGovernor, AdaptiveConfig
+
+    model_name = "gpt2"
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+    except Exception:
+        pytest.skip("gpt2 not available")
+
+    model.eval()
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    cfg = AdaptiveConfig(window_size=4, learning_rate=0.1)
+    gov = AdaptiveGovernor.signal_only(model, tokenizer, config=cfg)
+
+    input_ids = tokenizer.encode("The quick brown fox", return_tensors="pt")
+    with torch.no_grad():
+        output = model.generate(input_ids, max_new_tokens=16, do_sample=False,
+                                pad_token_id=tokenizer.eos_token_id)
+
+    report = gov.report()
+    assert report["tokens_observed"] > 0
+    assert report["windows_processed"] >= 1
+
+    gov.detach()
