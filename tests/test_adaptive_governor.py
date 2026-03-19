@@ -44,3 +44,28 @@ def test_signal_window_not_full():
     win.push([1.0, 2.0])
     assert not win.is_full()
     assert win.stats() is None
+
+
+def test_ema_tracker_smooths():
+    """EMATracker applies exponential moving average to signal stats."""
+    from dflux.adaptive_governor import EMATracker
+
+    ema = EMATracker(n_layers=2, alpha=0.5)
+    ema.update({"mean": [1.0, 2.0], "std": [0.1, 0.2], "trend": [0.0, 0.0],
+                "min": [0.9, 1.8], "max": [1.1, 2.2]})
+    assert abs(ema.mean[0] - 1.0) < 1e-6
+
+    ema.update({"mean": [3.0, 4.0], "std": [0.3, 0.4], "trend": [0.1, 0.1],
+                "min": [2.8, 3.8], "max": [3.2, 4.2]})
+    assert abs(ema.mean[0] - 2.0) < 1e-6
+    assert abs(ema.mean[1] - 3.0) < 1e-6
+
+
+def test_ema_tracker_trend():
+    """EMATracker tracks smoothed trend."""
+    from dflux.adaptive_governor import EMATracker
+
+    ema = EMATracker(n_layers=1, alpha=1.0)
+    ema.update({"mean": [5.0], "std": [0.1], "trend": [0.5],
+                "min": [4.5], "max": [5.5]})
+    assert abs(ema.trend[0] - 0.5) < 1e-6

@@ -111,3 +111,57 @@ class SignalWindow:
 
     def clear(self) -> None:
         self._buf.clear()
+
+
+# ── EMA Tracker ────────────────────────────────────────────────────
+
+class EMATracker:
+    """Exponential moving average of windowed signal statistics.
+
+    Smooths out noise from individual windows to track the real
+    trajectory of each signal per layer.
+
+    Parameters
+    ----------
+    n_layers : int
+        Number of layers to track.
+    alpha : float
+        EMA coefficient.  Higher = more weight on recent data.
+        0.3 is a good default for 32-token windows.
+    """
+
+    def __init__(self, n_layers: int, alpha: float = 0.3) -> None:
+        self.n_layers = n_layers
+        self.alpha = alpha
+        self.mean: List[float] = [0.0] * n_layers
+        self.std: List[float] = [0.0] * n_layers
+        self.trend: List[float] = [0.0] * n_layers
+        self._initialized = False
+
+    def update(self, stats: Dict[str, List[float]]) -> None:
+        """Update EMA with new window statistics."""
+        if not self._initialized:
+            self.mean = list(stats["mean"])
+            self.std = list(stats["std"])
+            self.trend = list(stats.get("trend", [0.0] * self.n_layers))
+            self._initialized = True
+            return
+
+        a = self.alpha
+        for i in range(self.n_layers):
+            if i < len(stats["mean"]):
+                self.mean[i] = a * stats["mean"][i] + (1 - a) * self.mean[i]
+            if i < len(stats["std"]):
+                self.std[i] = a * stats["std"][i] + (1 - a) * self.std[i]
+            if "trend" in stats and i < len(stats["trend"]):
+                self.trend[i] = a * stats["trend"][i] + (1 - a) * self.trend[i]
+
+    @property
+    def initialized(self) -> bool:
+        return self._initialized
+
+    def reset(self) -> None:
+        self.mean = [0.0] * self.n_layers
+        self.std = [0.0] * self.n_layers
+        self.trend = [0.0] * self.n_layers
+        self._initialized = False
