@@ -69,3 +69,73 @@ def test_ema_tracker_trend():
     ema.update({"mean": [5.0], "std": [0.1], "trend": [0.5],
                 "min": [4.5], "max": [5.5]})
     assert abs(ema.trend[0] - 0.5) < 1e-6
+
+
+def test_scale_optimizer_nudges_toward_target():
+    """ScaleOptimizer nudges current scales toward target based on signals."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=3,
+        target_scales={0: 1.2, 1: 0.9, 2: 1.0},
+        learning_rate=0.1,
+        min_scale=0.5,
+        max_scale=2.0,
+    )
+
+    current = {0: 1.0, 1: 1.0, 2: 1.0}
+    signals = {
+        "dilution_mean": [0.3, 0.7, 0.5],
+        "entropy_mean": [0.5, 0.3, 0.4],
+        "ratio_mean": [1.0, 1.0, 1.0],
+    }
+
+    new_scales = opt.step(current, signals)
+    # Layer 0 should move toward 1.2 (increase)
+    assert new_scales[0] > 1.0
+    # Layer 1 should move toward 0.9 (decrease)
+    assert new_scales[1] < 1.0
+    # All within bounds
+    for s in new_scales.values():
+        assert 0.5 <= s <= 2.0
+
+
+def test_scale_optimizer_respects_bounds():
+    """ScaleOptimizer clamps to min/max."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=1,
+        target_scales={0: 5.0},
+        learning_rate=1.0,
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+
+    current = {0: 1.4}
+    signals = {"dilution_mean": [0.1], "entropy_mean": [0.5], "ratio_mean": [1.0]}
+    new_scales = opt.step(current, signals)
+    assert new_scales[0] <= 1.5
+
+
+def test_scale_optimizer_no_target_stays_signal_driven():
+    """Without target profile, optimizer is purely signal-driven."""
+    from dflux.adaptive_governor import ScaleOptimizer
+
+    opt = ScaleOptimizer(
+        n_layers=2,
+        target_scales=None,
+        learning_rate=0.1,
+        min_scale=0.75,
+        max_scale=1.5,
+    )
+
+    current = {0: 1.0, 1: 1.0}
+    signals = {
+        "dilution_mean": [0.2, 0.8],
+        "entropy_mean": [0.5, 0.5],
+        "ratio_mean": [1.0, 1.0],
+    }
+    new_scales = opt.step(current, signals)
+    # Low dilution = low survival = needs amplification
+    assert new_scales[0] > 1.0

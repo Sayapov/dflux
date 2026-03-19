@@ -165,3 +165,135 @@ class EMATracker:
         self.std = [0.0] * self.n_layers
         self.trend = [0.0] * self.n_layers
         self._initialized = False
+
+
+# ── Scale Optimizer ────────────────────────────────────────────────
+
+class ScaleOptimizer:
+    """Gradient-free scale optimizer using hybrid signals.
+
+    Computes a desired scale direction from three signals:
+      - dilution_survival: low survival → boost (amplify layer's work)
+      - entropy_reduction: high reduction → boost (layer is useful)
+      - mlp_attn_ratio: used as stability indicator
+
+    If a target profile is provided, the optimizer blends signal-driven
+    adjustments with a compass pull toward the target scales.
+
+    Parameters
+    ----------
+    n_layers : int
+        Number of layers.
+    target_scales : dict[int, float] | None
+        Target per-layer scale profile (compass). None = pure signal-driven.
+    learning_rate : float
+        How fast scales move per window (0.05-0.2 recommended).
+    min_scale : float
+        Lower clamp for scales.
+    max_scale : float
+        Upper clamp for scales.
+    compass_weight : float
+        How much to weight the target profile pull vs signal-driven (0-1).
+        0.0 = pure signal, 1.0 = pure target following.
+    signal_weights : dict
+        Relative weights for each signal. Default: equal.
+    """
+
+    def __init__(
+        self,
+        n_layers: int,
+        target_scales: Optional[Dict[int, float]] = None,
+        learning_rate: float = 0.1,
+        min_scale: float = 0.75,
+        max_scale: float = 1.5,
+        compass_weight: float = 0.4,
+        signal_weights: Optional[Dict[str, float]] = None,
+    ) -> None:
+        self.n_layers = n_layers
+        self.target_scales = target_scales or {}
+        self.lr = learning_rate
+        self.min_scale = min_scale
+        self.max_scale = max_scale
+        self.compass_weight = compass_weight
+        self.signal_weights = signal_weights or {
+            "dilution": 0.4,
+            "entropy": 0.4,
+            "ratio": 0.2,
+        }
+
+    def step(
+        self,
+        current_scales: Dict[int, float],
+        signals: Dict[str, List[float]],
+    ) -> Dict[int, float]:
+        """Compute new scales from current scales and windowed signal stats.
+
+        Parameters
+        ----------
+        current_scales : dict[int, float]
+            Current per-layer scales.
+        signals : dict
+            Must contain keys: dilution_mean, entropy_mean, ratio_mean.
+            Each value is a list of per-layer signal means.
+
+        Returns
+        -------
+        dict[int, float]
+            New per-layer scales, clamped to [min_scale, max_scale].
+        """
+        dilution = signals.get("dilution_mean", [0.5] * self.n_layers)
+        entropy = signals.get("entropy_mean", [0.0] * self.n_layers)
+        ratio = signals.get("ratio_mean", [1.0] * self.n_layers)
+
+        # Normalize signals to [0, 1] range for combining
+        def _normalize(vals):
+            if not vals:
+                return vals
+            lo, hi = min(vals), max(vals)
+            rng = hi - lo
+            if rng < 1e-10:
+                return [0.5] * len(vals)
+            return [(v - lo) / rng for v in vals]
+
+        dilution_n = _normalize(dilution)
+        entropy_n = _normalize(entropy)
+        ratio_n = _normalize(ratio)
+
+        new_scales = {}
+        w = self.signal_weights
+
+        for i in range(self.n_layers):
+            current = current_scales.get(i, 1.0)
+
+            # ── Signal-driven direction ──
+            # Low dilution survival → layer's work gets wasted → boost it
+            dilution_drive = 1.0 - dilution_n[i] if i < len(dilution_n) else 0.0
+            # High entropy reduction → layer is doing useful compression → boost
+            entropy_drive = entropy_n[i] if i < len(entropy_n) else 0.0
+            # Ratio drive: center at 0.5 (neutral)
+            ratio_drive = (ratio_n[i] - 0.5) if i < len(ratio_n) else 0.0
+
+            signal_direction = (
+                w["dilution"] * dilution_drive
+                + w["entropy"] * entropy_drive
+                + w["ratio"] * ratio_drive
+            )
+            # Map to [-1, 1] range: 0.5 is neutral
+            signal_direction = (signal_direction - 0.3) * 2.0  # rough centering
+
+            # ── Compass pull (toward target profile) ──
+            compass_direction = 0.0
+            if i in self.target_scales:
+                target = self.target_scales[i]
+                compass_direction = target - current
+
+            # ── Blend signal + compass ──
+            cw = self.compass_weight if self.target_scales else 0.0
+            total_direction = (1.0 - cw) * signal_direction + cw * compass_direction
+
+            # ── Apply with learning rate ──
+            new = current + self.lr * total_direction
+            new = max(self.min_scale, min(self.max_scale, new))
+            new_scales[i] = new
+
+        return new_scales
